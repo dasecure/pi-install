@@ -629,6 +629,7 @@ async def update_agent():
         result = subprocess.run(["bash", "-c", f"curl -fsSL {INSTALL_URL} | bash -s -- --update"], capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
             return {"success": False, "message": result.stderr.strip()[-500:], "output": result.stdout.strip()[-500:]}
+        subprocess.Popen(["systemctl", "restart", "pi-monitor"])
         return {"success": True, "message": "Update applied, restarting agent...", "output": result.stdout.strip()[-500:]}
     except Exception as e:
         return {"success": False, "message": str(e), "output": None}
@@ -927,21 +928,15 @@ echo -e "${YELLOW}[$STEP/$TOTAL_STEPS] Installing agent service...${NC}"
 cp /opt/pi-utility/pi-service/pi-monitor.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable pi-monitor
-systemctl restart pi-monitor
-echo -e "  ${GREEN}✓${NC} pi-monitor.service enabled and started"
 
-# Update mode: done — exit early
+# Update mode: skip restart here — the /update API endpoint restarts after responding
 if [ "$UPDATE_MODE" = true ]; then
-  sleep 2
-  if systemctl is-active --quiet pi-monitor; then
-    echo -e "  ${GREEN}✓${NC} Agent is running"
-  else
-    echo -e "  ${RED}✗${NC} Agent may need a moment to start (check: journalctl -u pi-monitor -n 20)"
-  fi
-  echo ""
-  echo -e "${GREEN}Update complete!${NC}"
+  echo -e "  ${GREEN}✓${NC} Agent files updated (restart pending)"
   exit 0
 fi
+
+systemctl restart pi-monitor
+echo -e "  ${GREEN}✓${NC} pi-monitor.service enabled and started"
 
 sleep 2
 
