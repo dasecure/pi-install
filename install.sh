@@ -358,7 +358,18 @@ def save_pages_manifest(pages: list[dict]) -> bool:
         logger.error(f"Failed to save pages manifest: {e}")
         return False
 
-async def notify_iotpush(message: str, title: str = "Pi Zero-Trust", force: bool = False, bypass_cooldown: bool = False) -> bool:
+def _get_device_info() -> tuple[str, str]:
+    hostname = os.uname().nodename
+    ts_ip = get_tailscale_ip() or "N/A"
+    return hostname, ts_ip
+
+def _build_device_actions(hostname: str, ts_ip: str) -> list[dict]:
+    actions = []
+    if ts_ip and ts_ip != "N/A":
+        actions.append({"action": "view", "label": f"Open {hostname}", "url": f"http://{ts_ip}:8080/stats", "clear": True})
+    return actions
+
+async def notify_iotpush(message: str, title: str = "Pi Zero-Trust", force: bool = False, bypass_cooldown: bool = False, priority: str = "normal", tags: list[str] | None = None, actions: list[dict] | None = None, click: str | None = None) -> bool:
     global _settings, _last_notify_times
     if not force and not _settings.notifications_enabled:
         return False
@@ -375,17 +386,23 @@ async def notify_iotpush(message: str, title: str = "Pi Zero-Trust", force: bool
     if not api_key or not topic:
         logger.warning("iotPush not configured")
         return False
+    payload: dict = {"title": title, "message": message, "priority": priority}
+    if tags: payload["tags"] = tags
+    if actions: payload["actions"] = actions
+    if click: payload["click"] = click
     for attempt in range(config.MAX_RETRIES):
         try:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     f"https://www.iotpush.com/api/push/{topic}",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    content=message, timeout=10
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json=payload, timeout=10
                 )
                 if response.status_code == 200:
-                    logger.info(f"iotPush sent: {message[:50]}")
+                    logger.info(f"iotPush sent: {title} - {message[:50]}")
                     return True
+                else:
+                    logger.warning(f"iotPush status {response.status_code}: {response.text[:100]}")
         except Exception as e:
             logger.error(f"iotPush error (attempt {attempt + 1}): {e}")
         if attempt < config.MAX_RETRIES - 1:
@@ -399,13 +416,9 @@ async def lifespan(app: FastAPI):
     sd_notify("READY=1")
     PAGES_DIR.mkdir(parents=True, exist_ok=True)
     watchdog_task = asyncio.create_task(watchdog_loop())
-    ts_ip = get_tailscale_ip()
-    hostname = os.uname().nodename
+    hostname, ts_ip = _get_device_info()
     if _settings.notifications_enabled and _settings.notify_on_boot:
-        boot_msg = f"🟢 {hostname} online"
-        if ts_ip:
-            boot_msg += f" | {ts_ip}:8080"
-        await notify_iotpush(boot_msg)
+        await notify_iotpush(message=f"{hostname} is online at {ts_ip}", title=f"🟢 {hostname} Online", priority="normal", tags=["green_circle", hostname], actions=_build_device_actions(hostname, ts_ip), click=f"http://{ts_ip}:8080/stats" if ts_ip != "N/A" else None)
     yield
     global _page_server_process
     if _page_server_process is not None:
@@ -418,7 +431,7 @@ async def lifespan(app: FastAPI):
     watchdog_task.cancel()
     logger.info("Pi Agent shutting down...")
     if _settings.notifications_enabled and _settings.notify_on_boot:
-        await notify_iotpush(f"🔴 {hostname} offline")
+        await notify_iotpush(message=f"{hostname} has gone offline ({ts_ip})", title=f"🔴 {hostname} Offline", priority="high", tags=["red_circle", hostname])
 
 app = FastAPI(title="Pi Zero-Trust Agent", version="3.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -648,22 +661,24 @@ async def update_agent():
 @app.post("/reboot", dependencies=[Depends(verify_auth)])
 async def reboot():
     if _settings.notifications_enabled and _settings.notify_on_reboot:
-        await notify_iotpush(f"🔄 {os.uname().nodename} rebooting")
+        hostname, ts_ip = _get_device_info()
+        await notify_iotpush(message=f"{hostname} ({ts_ip}) is rebooting. It will be back shortly.", title=f"🔄 {hostname} Rebooting", priority="high", tags=["arrows_counterclockwise", hostname], actions=_build_device_actions(hostname, ts_ip))
     subprocess.Popen(["sudo", "reboot"])
     return {"success": True, "message": "Rebooting..."}
 
 @app.post("/shutdown", dependencies=[Depends(verify_auth)])
 async def shutdown():
     if _settings.notifications_enabled and _settings.notify_on_reboot:
-        await notify_iotpush(f"⏹️ {os.uname().nodename} shutting down")
+        hostname, ts_ip = _get_device_info()
+        await notify_iotpush(message=f"{hostname} ({ts_ip}) is shutting down.", title=f"⏹️ {hostname} Shutting Down", priority="urgent", tags=["stop_button", hostname])
     subprocess.Popen(["sudo", "shutdown", "-h", "now"])
     return {"success": True, "message": "Shutting down..."}
 
 @app.post("/uninstall", dependencies=[Depends(verify_auth)])
 async def uninstall():
-    hostname = os.uname().nodename
+    hostname, ts_ip = _get_device_info()
     if _settings.notifications_enabled:
-        await notify_iotpush(f"🗑️ {hostname} agent uninstalling", force=True)
+        await notify_iotpush(message=f"{hostname} ({ts_ip}) agent is being uninstalled.", title=f"🗑️ {hostname} Uninstalling", priority="urgent", tags=["wastebasket", hostname], force=True)
     uninstall_script = Path("/opt/pi-utility/uninstall.sh")
     if not uninstall_script.exists():
         raise HTTPException(status_code=404, detail="Uninstall script not found")
@@ -687,24 +702,39 @@ async def toggle_notifications(enabled: bool = True):
     global _settings
     _settings.notifications_enabled = enabled
     if save_settings(_settings):
-        if enabled: await notify_iotpush("🔔 Notifications enabled", force=True)
+        if enabled:
+            hostname, ts_ip = _get_device_info()
+            await notify_iotpush(message=f"Notifications enabled on {hostname} ({ts_ip})", title=f"🔔 {hostname} Notifications On", tags=["bell", hostname], actions=_build_device_actions(hostname, ts_ip), force=True)
         return {"success": True, "notifications_enabled": enabled}
     raise HTTPException(status_code=500, detail="Failed to save settings")
 
 @app.post("/settings/test-notification", dependencies=[Depends(verify_auth)])
 async def test_notification():
-    success = await notify_iotpush("🧪 Test notification from Pi!", force=True, bypass_cooldown=True)
+    hostname, ts_ip = _get_device_info()
+    success = await notify_iotpush(message=f"Test push from {hostname} ({ts_ip}). If you see this, iotPush is working!", title=f"🧪 {hostname} Test", tags=["test_tube", hostname], actions=_build_device_actions(hostname, ts_ip), force=True, bypass_cooldown=True)
     return {"success": success}
+
+class NotifyAction(BaseModel):
+    action: str = "view"
+    label: str
+    url: str = ""
+    clear: bool = True
 
 class NotifyRequest(BaseModel):
     title: str = "Pi Zero-Trust"
     message: str
-
+    priority: str = "normal"
+    tags: list[str] = []
+    actions: list[NotifyAction] = []
+    click: str = ""
 
 @app.post("/notify", dependencies=[Depends(verify_auth)])
 async def send_notify(req: NotifyRequest):
-    text = f"{req.title}: {req.message}" if req.title != "Pi Zero-Trust" else req.message
-    success = await notify_iotpush(text, title=req.title, force=True, bypass_cooldown=True)
+    hostname, ts_ip = _get_device_info()
+    tags = req.tags if req.tags else [hostname]
+    actions = [a.model_dump() for a in req.actions] if req.actions else _build_device_actions(hostname, ts_ip)
+    click = req.click if req.click else (f"http://{ts_ip}:8080/stats" if ts_ip != "N/A" else None)
+    success = await notify_iotpush(message=req.message, title=req.title, priority=req.priority, tags=tags, actions=actions, click=click, force=True, bypass_cooldown=True)
     return {"success": success}
 
 @app.post("/ai/generate", dependencies=[Depends(verify_auth)])
