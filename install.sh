@@ -199,6 +199,11 @@ fi
 
 fi # end UPDATE_MODE=false block
 
+# Clean up stale .git directory so version-based update checks work
+if [ -d /opt/pi-utility/.git ]; then
+  rm -rf /opt/pi-utility/.git
+fi
+
 # ============ Step: Write agent files (self-contained) ============
 STEP=$((STEP + 1))
 echo -e "${YELLOW}[$STEP/$TOTAL_STEPS] Writing agent files...${NC}"
