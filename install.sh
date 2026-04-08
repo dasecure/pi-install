@@ -613,13 +613,13 @@ async def update_agent():
     if git_dir.exists():
         try:
             pull = subprocess.run(["git", "pull", "origin", "main"], cwd=repo, capture_output=True, text=True, timeout=30)
-            if pull.returncode != 0:
-                return {"success": False, "message": pull.stderr.strip(), "output": pull.stdout.strip()}
-            subprocess.run([str(repo / "venv/bin/pip"), "install", "-q", "-r", str(repo / "pi-service/requirements.txt")], capture_output=True, text=True, timeout=60)
-            subprocess.Popen(["systemctl", "restart", "pi-monitor"])
-            return {"success": True, "message": "Update applied, restarting agent...", "output": pull.stdout.strip()}
+            if pull.returncode == 0:
+                subprocess.run([str(repo / "venv/bin/pip"), "install", "-q", "-r", str(repo / "pi-service/requirements.txt")], capture_output=True, text=True, timeout=60)
+                subprocess.Popen(["systemctl", "restart", "pi-monitor"])
+                return {"success": True, "message": "Update applied, restarting agent...", "output": pull.stdout.strip()}
+            logger.warning(f"git pull failed, falling back to script update: {pull.stderr.strip()}")
         except Exception as e:
-            return {"success": False, "message": str(e), "output": None}
+            logger.warning(f"git update failed, falling back to script update: {e}")
     try:
         result = subprocess.run(["bash", "-c", f"curl -fsSL {INSTALL_URL} | bash -s -- --update"], capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
