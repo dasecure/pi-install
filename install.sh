@@ -922,3 +922,22 @@ echo "Test it:"
 echo "  curl http://$PUBLIC_IP:8080/health"
 echo "  curl -H 'X-API-Token: $API_TOKEN' http://$PUBLIC_IP:8080/stats"
 echo ""
+
+# Generate QR code for PiControl app scanning
+QR_DATA="{\"h\":\"$HOSTNAME\",\"a\":\"$PUBLIC_IP\",\"p\":8080,\"t\":\"$API_TOKEN\",\"d\":\"$(echo $DEVICE_TYPE | tr '[:upper:]' '[:lower:]')\"}"
+/opt/pi-utility/venv/bin/pip install -q qrcode[pil] 2>/dev/null || true
+/opt/pi-utility/venv/bin/python3 -c "
+import sys
+try:
+    import qrcode
+    qr = qrcode.QRCode(border=1)
+    qr.add_data(sys.argv[1])
+    qr.make(fit=True)
+    qr.print_ascii(invert=True)
+except ImportError:
+    pass
+" "$QR_DATA" 2>/dev/null && {
+  echo ""
+  echo -e "${BLUE}Scan this QR code in PiControl app → Settings → Scan QR${NC}"
+  echo ""
+} || true
