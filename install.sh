@@ -27,6 +27,7 @@ TAILSCALE_KEY=""
 HOSTNAME="${HOSTNAME:-zerotrust-pi}"
 ENABLE_WATCHDOG=false
 NO_TAILSCALE=false
+UPDATE_MODE=false
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -58,6 +59,10 @@ while [[ $# -gt 0 ]]; do
       CUSTOM_API_TOKEN="$2"
       shift 2
       ;;
+    --update)
+      UPDATE_MODE=true
+      shift
+      ;;
     *)
       echo -e "${RED}Unknown option: $1${NC}"
       exit 1
@@ -65,6 +70,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# ============ Update Mode: skip config/Tailscale, just update files ============
+if [ "$UPDATE_MODE" = true ]; then
+  echo -e "${BLUE}Update mode: refreshing agent files only...${NC}"
+  echo ""
+  STEP=0
+  TOTAL_STEPS=3
+fi
+
+if [ "$UPDATE_MODE" = false ]; then
 # Validate required args
 if [ "$NO_TAILSCALE" = false ] && { [ -z "$IOTPUSH_KEY" ] || [ -z "$IOTPUSH_TOPIC" ] || [ -z "$TAILSCALE_KEY" ]; }; then
   echo -e "${RED}Missing required arguments!${NC}"
@@ -183,6 +197,8 @@ else
   TS_IP="N/A"
 fi
 
+fi # end UPDATE_MODE=false block
+
 # ============ Step: Write agent files (self-contained) ============
 STEP=$((STEP + 1))
 echo -e "${YELLOW}[$STEP/$TOTAL_STEPS] Writing agent files...${NC}"
@@ -218,6 +234,9 @@ from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("pi-agent")
+
+AGENT_VERSION = "3.0.1"
+INSTALL_URL = "https://raw.githubusercontent.com/dasecure/pi-install/main/install.sh"
 
 ENV_PATH = Path("/etc/pi-zero-trust/.env")
 load_dotenv(ENV_PATH)
@@ -548,37 +567,64 @@ async def stream_logs(log_type: str):
 
 @app.get("/check-update", dependencies=[Depends(verify_auth)])
 async def check_update():
+    import re as _re
     repo = config.REPO_PATH
+    git_dir = repo / ".git"
+    if git_dir.exists():
+        try:
+            subprocess.run(["git", "fetch", "origin"], cwd=repo, capture_output=True, text=True, timeout=15)
+            current = subprocess.run(["git", "log", "-1", "--format=%H|%s|%ai"], cwd=repo, capture_output=True, text=True)
+            latest = subprocess.run(["git", "log", "-1", "origin/main", "--format=%H|%s|%ai"], cwd=repo, capture_output=True, text=True)
+            behind = subprocess.run(["git", "rev-list", "--count", "HEAD..origin/main"], cwd=repo, capture_output=True, text=True)
+            c_parts = current.stdout.strip().split("|")
+            l_parts = latest.stdout.strip().split("|")
+            count = int(behind.stdout.strip()) if behind.returncode == 0 else 0
+            return {
+                "update_available": count > 0, "commits_behind": count,
+                "current_version": c_parts[0][:7] if c_parts else "—",
+                "current_message": c_parts[1] if len(c_parts) > 1 else "",
+                "current_date": c_parts[2] if len(c_parts) > 2 else "",
+                "latest_version": l_parts[0][:7] if l_parts else "",
+                "latest_message": l_parts[1] if len(l_parts) > 1 else "",
+                "latest_date": l_parts[2] if len(l_parts) > 2 else "",
+            }
+        except Exception as e:
+            return {"update_available": False, "commits_behind": 0, "current_version": "—", "current_message": str(e), "current_date": "", "latest_version": "", "latest_message": "", "latest_date": ""}
     try:
-        subprocess.run(["git", "fetch", "origin"], cwd=repo, capture_output=True, text=True, timeout=15)
-        current = subprocess.run(["git", "log", "-1", "--format=%H|%s|%ai"], cwd=repo, capture_output=True, text=True)
-        latest = subprocess.run(["git", "log", "-1", "origin/main", "--format=%H|%s|%ai"], cwd=repo, capture_output=True, text=True)
-        behind = subprocess.run(["git", "rev-list", "--count", "HEAD..origin/main"], cwd=repo, capture_output=True, text=True)
-        c_parts = current.stdout.strip().split("|")
-        l_parts = latest.stdout.strip().split("|")
-        count = int(behind.stdout.strip()) if behind.returncode == 0 else 0
-        return {
-            "update_available": count > 0, "commits_behind": count,
-            "current_version": c_parts[0][:7] if c_parts else "—",
-            "current_message": c_parts[1] if len(c_parts) > 1 else "",
-            "current_date": c_parts[2] if len(c_parts) > 2 else "",
-            "latest_version": l_parts[0][:7] if l_parts else "",
-            "latest_message": l_parts[1] if len(l_parts) > 1 else "",
-            "latest_date": l_parts[2] if len(l_parts) > 2 else "",
-        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(INSTALL_URL, timeout=15)
+            if resp.status_code == 200:
+                match = _re.search(r'AGENT_VERSION\s*=\s*["\']([^"\']+)["\']', resp.text)
+                remote_version = match.group(1) if match else "unknown"
+                update_available = remote_version != AGENT_VERSION
+                return {
+                    "update_available": update_available, "commits_behind": 1 if update_available else 0,
+                    "current_version": AGENT_VERSION, "current_message": "Self-contained install", "current_date": "",
+                    "latest_version": remote_version, "latest_message": "Latest from pi-install" if update_available else "Up to date", "latest_date": "",
+                }
     except Exception as e:
-        return {"update_available": False, "commits_behind": 0, "current_version": "—", "current_message": str(e), "current_date": "", "latest_version": "", "latest_message": "", "latest_date": ""}
+        logger.error(f"Script-based update check failed: {e}")
+    return {"update_available": False, "commits_behind": 0, "current_version": AGENT_VERSION, "current_message": "Self-contained install", "current_date": "", "latest_version": "", "latest_message": "Could not check remote", "latest_date": ""}
 
 @app.post("/update", dependencies=[Depends(verify_auth)])
 async def update_agent():
     repo = config.REPO_PATH
+    git_dir = repo / ".git"
+    if git_dir.exists():
+        try:
+            pull = subprocess.run(["git", "pull", "origin", "main"], cwd=repo, capture_output=True, text=True, timeout=30)
+            if pull.returncode != 0:
+                return {"success": False, "message": pull.stderr.strip(), "output": pull.stdout.strip()}
+            subprocess.run([str(repo / "venv/bin/pip"), "install", "-q", "-r", str(repo / "pi-service/requirements.txt")], capture_output=True, text=True, timeout=60)
+            subprocess.Popen(["systemctl", "restart", "pi-monitor"])
+            return {"success": True, "message": "Update applied, restarting agent...", "output": pull.stdout.strip()}
+        except Exception as e:
+            return {"success": False, "message": str(e), "output": None}
     try:
-        pull = subprocess.run(["git", "pull", "origin", "main"], cwd=repo, capture_output=True, text=True, timeout=30)
-        if pull.returncode != 0:
-            return {"success": False, "message": pull.stderr.strip(), "output": pull.stdout.strip()}
-        subprocess.run([str(repo / "venv/bin/pip"), "install", "-q", "-r", str(repo / "pi-service/requirements.txt")], capture_output=True, text=True, timeout=60)
-        subprocess.Popen(["systemctl", "restart", "pi-monitor"])
-        return {"success": True, "message": "Update applied, restarting agent...", "output": pull.stdout.strip()}
+        result = subprocess.run(["bash", "-c", f"curl -fsSL {INSTALL_URL} | bash -s -- --update"], capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            return {"success": False, "message": result.stderr.strip()[-500:], "output": result.stdout.strip()[-500:]}
+        return {"success": True, "message": "Update applied, restarting agent...", "output": result.stdout.strip()[-500:]}
     except Exception as e:
         return {"success": False, "message": str(e), "output": None}
 
@@ -878,6 +924,19 @@ systemctl daemon-reload
 systemctl enable pi-monitor
 systemctl restart pi-monitor
 echo -e "  ${GREEN}✓${NC} pi-monitor.service enabled and started"
+
+# Update mode: done — exit early
+if [ "$UPDATE_MODE" = true ]; then
+  sleep 2
+  if systemctl is-active --quiet pi-monitor; then
+    echo -e "  ${GREEN}✓${NC} Agent is running"
+  else
+    echo -e "  ${RED}✗${NC} Agent may need a moment to start (check: journalctl -u pi-monitor -n 20)"
+  fi
+  echo ""
+  echo -e "${GREEN}Update complete!${NC}"
+  exit 0
+fi
 
 sleep 2
 
