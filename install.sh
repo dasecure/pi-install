@@ -266,6 +266,8 @@ class SettingsModel(BaseModel):
     notify_cooldown_minutes: int = 5
     tailscale_only: bool = True
     anthropic_api_key: str = ""
+    iotpush_api_key: str = ""
+    iotpush_topic: str = ""
 
 class GeneratePageRequest(BaseModel):
     prompt: str
@@ -298,12 +300,21 @@ def load_settings() -> SettingsModel:
         if SETTINGS_PATH.exists():
             with open(SETTINGS_PATH) as f:
                 data = json.load(f)
+                # Seed iotpush from env vars if not in saved settings
+                if not data.get("iotpush_api_key"):
+                    data["iotpush_api_key"] = os.getenv("IOTPUSH_API_KEY", "")
+                if not data.get("iotpush_topic"):
+                    data["iotpush_topic"] = os.getenv("IOTPUSH_TOPIC", "")
                 s = SettingsModel(**data)
                 config.TAILSCALE_ONLY = s.tailscale_only
                 return s
     except Exception as e:
         logger.error(f"Failed to load settings: {e}")
-    return SettingsModel(tailscale_only=config.TAILSCALE_ONLY)
+    return SettingsModel(
+        tailscale_only=config.TAILSCALE_ONLY,
+        iotpush_api_key=os.getenv("IOTPUSH_API_KEY", ""),
+        iotpush_topic=os.getenv("IOTPUSH_TOPIC", ""),
+    )
 
 def save_settings(settings: SettingsModel) -> bool:
     try:
@@ -359,8 +370,8 @@ async def notify_iotpush(message: str, title: str = "Pi Zero-Trust", force: bool
         if last_sent and (now - last_sent) < timedelta(minutes=cooldown):
             return False
         _last_notify_times[dedup_key] = now
-    api_key = os.getenv("IOTPUSH_API_KEY", "")
-    topic = os.getenv("IOTPUSH_TOPIC", "")
+    api_key = _settings.iotpush_api_key or os.getenv("IOTPUSH_API_KEY", "")
+    topic = _settings.iotpush_topic or os.getenv("IOTPUSH_TOPIC", "")
     if not api_key or not topic:
         logger.warning("iotPush not configured")
         return False
@@ -683,6 +694,17 @@ async def toggle_notifications(enabled: bool = True):
 @app.post("/settings/test-notification", dependencies=[Depends(verify_auth)])
 async def test_notification():
     success = await notify_iotpush("🧪 Test notification from Pi!", force=True, bypass_cooldown=True)
+    return {"success": success}
+
+class NotifyRequest(BaseModel):
+    title: str = "Pi Zero-Trust"
+    message: str
+
+
+@app.post("/notify", dependencies=[Depends(verify_auth)])
+async def send_notify(req: NotifyRequest):
+    text = f"{req.title}: {req.message}" if req.title != "Pi Zero-Trust" else req.message
+    success = await notify_iotpush(text, title=req.title, force=True, bypass_cooldown=True)
     return {"success": success}
 
 @app.post("/ai/generate", dependencies=[Depends(verify_auth)])
