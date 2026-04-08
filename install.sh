@@ -249,7 +249,7 @@ load_dotenv(ENV_PATH)
 class Config:
     IOTPUSH_API_KEY: str = os.getenv("IOTPUSH_API_KEY", "")
     API_TOKEN: str = os.getenv("PI_API_TOKEN", "")
-    TAILSCALE_ONLY: bool = os.getenv("TAILSCALE_ONLY", "true").lower() == "true"
+    TAILSCALE_ONLY: bool = os.getenv("TAILSCALE_ONLY", "false").lower() == "true"
     LOG_PATH: Path = Path("/var/log/pi-monitor")
     REPO_PATH: Path = Path("/opt/pi-utility")
     MAX_RETRIES: int = 3
@@ -264,7 +264,7 @@ class SettingsModel(BaseModel):
     notify_on_reboot: bool = True
     notify_on_update: bool = True
     notify_cooldown_minutes: int = 5
-    tailscale_only: bool = True
+    tailscale_only: bool = False
     anthropic_api_key: str = ""
     iotpush_api_key: str = ""
     iotpush_topic: str = ""
@@ -310,8 +310,10 @@ def load_settings() -> SettingsModel:
                 return s
     except Exception as e:
         logger.error(f"Failed to load settings: {e}")
+    import shutil
+    has_tailscale = shutil.which("tailscale") is not None
     return SettingsModel(
-        tailscale_only=config.TAILSCALE_ONLY,
+        tailscale_only=has_tailscale,
         iotpush_api_key=os.getenv("IOTPUSH_API_KEY", ""),
         iotpush_topic=os.getenv("IOTPUSH_TOPIC", ""),
     )
@@ -455,7 +457,7 @@ async def verify_auth(request: Request, authorization: Optional[str] = Header(No
         return True
     if is_tailscale_request(request):
         return True
-    if config.TAILSCALE_ONLY:
+    if _settings.tailscale_only:
         raise HTTPException(status_code=403, detail="Access denied: Only Tailscale connections allowed")
     token = x_api_token or (authorization.replace("Bearer ", "") if authorization else None)
     if not config.API_TOKEN:
@@ -692,6 +694,10 @@ async def get_settings():
 @app.post("/settings", dependencies=[Depends(verify_auth)])
 async def update_settings(new_settings: SettingsModel):
     global _settings
+    if new_settings.tailscale_only and not _settings.tailscale_only:
+        ts_ip = get_tailscale_ip()
+        if not ts_ip:
+            raise HTTPException(status_code=400, detail="Cannot enable Tailscale Only: Tailscale is not running on this device")
     _settings = new_settings
     if save_settings(_settings):
         return {"success": True, "settings": _settings.model_dump()}
