@@ -983,7 +983,7 @@ After=network.target
 Type=forking
 User=root
 ExecStartPre=-/usr/bin/vncserver -kill :1
-ExecStart=/usr/bin/vncserver :1 -geometry 1280x720 -depth 24 -localhost yes
+ExecStart=/usr/bin/vncserver :1 -geometry 1280x720 -depth 24 -localhost no
 ExecStop=/usr/bin/vncserver -kill :1
 Restart=on-failure
 RestartSec=5
@@ -1068,7 +1068,7 @@ _install_remote_desktop() {
     echo -e "  $(gum style --faint 'This may take a few minutes on first install...')"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
-    apt-get install -y -qq xfce4 xfce4-goodies dbus-x11 2>&1 | tail -1
+    apt-get install -y -qq xfce4 xfce4-goodies dbus-x11 xterm 2>&1 | tail -1
     echo -e "  $(gum style --foreground 76 '✓ XFCE4 installed')"
     echo ""
 
@@ -1118,8 +1118,8 @@ XSTARTUP
 ## Security types
 SecurityTypes=VncAuth
 
-## Only listen on localhost (use SSH tunnel or Tailscale for remote access)
-localhost=yes
+## Listen on all interfaces (Tailscale provides network-level security)
+localhost=no
 
 ## Display settings
 geometry=1280x720
@@ -1144,7 +1144,7 @@ After=network.target
 Type=forking
 User=root
 ExecStartPre=-/usr/bin/vncserver -kill :1
-ExecStart=/usr/bin/vncserver :1 -geometry 1280x720 -depth 24 -localhost yes
+ExecStart=/usr/bin/vncserver :1 -geometry 1280x720 -depth 24 -localhost no
 ExecStop=/usr/bin/vncserver -kill :1
 Restart=on-failure
 RestartSec=5
@@ -1175,14 +1175,12 @@ VNCSERVICE
         --padding "1 4" \
         "$(gum style --bold --foreground 76 '🖥  Remote Desktop Ready!')"
     echo ""
-    echo -e "  Connect from iOS:"
-    echo -e "    $(gum style --bold '1.') Install $(gum style --foreground 36 'RealVNC Viewer') or $(gum style --foreground 36 'Screens 5') from App Store"
-    echo -e "    $(gum style --bold '2.') Set up SSH tunnel (VNC is localhost-only):"
-    echo -e "       $(gum style --faint 'ssh -L 5901:localhost:5901 root@$CONNECT_IP')"
-    echo -e "    $(gum style --bold '3.') Connect VNC client to:"
-    echo -e "       $(gum style --foreground 76 'localhost:5901')"
+    echo -e "  Connect from iOS or Mac:"
+    echo -e "    $(gum style --bold '1.') Install $(gum style --foreground 36 'RealVNC Viewer') (free) from App Store"
+    echo -e "    $(gum style --bold '2.') Connect to:"
+    echo -e "       $(gum style --foreground 76 '$CONNECT_IP:5901')"
     echo ""
-    echo -e "  $(gum style --faint 'Tip: On Tailscale, you can SSH tunnel from iOS using Termius or Blink Shell')"
+    echo -e "  $(gum style --faint 'Password: the VNC password you set during installation')"
     echo ""
 
     # Send iotPush notification
