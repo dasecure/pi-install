@@ -972,14 +972,33 @@ do_remote_desktop() {
 
         *"Start"*)
             echo ""
+            # Ensure service file exists
+            if [ ! -f /etc/systemd/system/vncserver.service ]; then
+                cat > /etc/systemd/system/vncserver.service << 'VNCSVC'
+[Unit]
+Description=TigerVNC server (display :1)
+After=network.target
+
+[Service]
+Type=forking
+User=root
+ExecStartPre=-/usr/bin/vncserver -kill :1
+ExecStart=/usr/bin/vncserver :1 -geometry 1280x720 -depth 24 -localhost yes
+ExecStop=/usr/bin/vncserver -kill :1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+VNCSVC
+                systemctl daemon-reload
+                systemctl enable vncserver
+            fi
             systemctl start vncserver 2>/dev/null && {
                 echo -e "  $(gum style --foreground 76 '✓ VNC started')"
             } || {
-                vncserver :1 -geometry 1280x720 -depth 24 2>/dev/null && {
-                    echo -e "  $(gum style --foreground 76 '✓ VNC started')"
-                } || {
-                    echo -e "  $(gum style --foreground 214 '✗ Failed to start VNC')"
-                }
+                echo -e "  $(gum style --foreground 214 '✗ Failed to start VNC')"
+                echo -e "  $(gum style --faint 'Try: journalctl -u vncserver -n 10')"
             }
             echo ""
             gum style --faint "  Connect with VNC client to $(hostname -I | awk '{print $1}'):5901"
