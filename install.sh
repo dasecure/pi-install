@@ -402,9 +402,9 @@ async def notify_iotpush(message: str, title: str = "Pi Zero-Trust", force: bool
         logger.warning("iotPush not configured")
         return False
     payload: dict = {"title": title, "message": message, "priority": priority}
-    if tags: payload["tags"] = tags
+    if tags: payload["tags"] = ",".join(tags) if isinstance(tags, list) else tags
     if actions: payload["actions"] = actions
-    if click: payload["click"] = click
+    if click: payload["click_url"] = click
     for attempt in range(config.MAX_RETRIES):
         try:
             async with httpx.AsyncClient() as client:
