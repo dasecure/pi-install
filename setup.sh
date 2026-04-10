@@ -665,17 +665,43 @@ curl -s -d "$1" \
 NOTIFYSCRIPT
             chmod +x /usr/local/bin/pi-notify
 
-            # Update settings.json
+            # Update settings.json — try python, then jq, then inline bash
+            _settings_updated=false
             if [ -f "$SETTINGS_FILE" ]; then
-                /opt/pi-utility/venv/bin/python3 -c "
+                if command -v /opt/pi-utility/venv/bin/python3 &>/dev/null; then
+                    /opt/pi-utility/venv/bin/python3 -c "
 import json
 with open('$SETTINGS_FILE') as f:
     s = json.load(f)
 s['iotpush_api_key'] = '$NEW_KEY'
 s['iotpush_topic'] = '$NEW_TOPIC'
+s['notifications_enabled'] = True
 with open('$SETTINGS_FILE', 'w') as f:
     json.dump(s, f, indent=2)
-" 2>/dev/null || true
+" && _settings_updated=true
+                fi
+                if [ "$_settings_updated" = false ] && command -v jq &>/dev/null; then
+                    jq --arg k "$NEW_KEY" --arg t "$NEW_TOPIC" \
+                       '. + {"iotpush_api_key":\$k, "iotpush_topic":\$t, "notifications_enabled":true}' \
+                       "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE" && _settings_updated=true
+                fi
+                if [ "$_settings_updated" = false ]; then
+                    # Fallback: rewrite the whole file preserving existing keys
+                    cat > "$SETTINGS_FILE" << 'SETTINGSJSON'
+{
+  "notifications_enabled": true,
+  "notify_on_boot": true,
+  "notify_on_reboot": true,
+  "notify_on_update": true,
+  "notify_cooldown_minutes": 5,
+  "tailscale_only": false,
+  "iotpush_api_key": "PLACEHOLDER_KEY",
+  "iotpush_topic": "PLACEHOLDER_TOPIC"
+}
+SETTINGSJSON
+                    sed -i "s|PLACEHOLDER_KEY|$NEW_KEY|" "$SETTINGS_FILE"
+                    sed -i "s|PLACEHOLDER_TOPIC|$NEW_TOPIC|" "$SETTINGS_FILE"
+                fi
             fi
 
             # Restart agent to pick up new config
