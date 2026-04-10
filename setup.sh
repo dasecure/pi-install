@@ -190,7 +190,7 @@ do_install() {
                 -H "Authorization: Bearer $IOTPUSH_KEY" \
                 -H "Content-Type: application/json" \
                 -d '{"title":"Pi Setup Test","message":"iotPush credentials verified during setup"}' \
-                "https://iotpush.com/api/push/$IOTPUSH_TOPIC" 2>/dev/null) && {
+                "https://www.iotpush.com/api/push/$IOTPUSH_TOPIC" 2>/dev/null) && {
                 echo -e "  $(gum style --foreground 76 '✓ iotPush credentials valid — test push sent')"
             } || {
                 echo -e "  $(gum style --foreground 214 '⚠ Could not verify — check your key and topic')"
@@ -375,7 +375,7 @@ do_post_install() {
                     -H "Authorization: Bearer $IOTPUSH_KEY_VAL" \
                     -H "Content-Type: application/json" \
                     -d "{\"title\":\"🧪 Test from $HOSTNAME_DISPLAY\",\"message\":\"iotPush is working! Sent during Pi Zero-Trust setup.\",\"priority\":\"normal\"}" \
-                    "https://iotpush.com/api/push/$IOTPUSH_TOPIC_VAL" 2>/dev/null) && {
+                    "https://www.iotpush.com/api/push/$IOTPUSH_TOPIC_VAL" 2>/dev/null) && {
                     echo -e "  $(gum style --foreground 76 '✓ Test notification sent')"
                     if [ -n "$TEST_RESP" ]; then
                         echo -e "  $(gum style --faint "$TEST_RESP")"
@@ -607,7 +607,7 @@ do_iotpush() {
                 -H "Authorization: Bearer $CURRENT_KEY" \
                 -H "Content-Type: application/json" \
                 -d "{\"title\":\"🧪 Test from $HOSTNAME_DISPLAY\",\"message\":\"iotPush is working! Sent from Pi Zero-Trust setup TUI.\",\"priority\":\"normal\"}" \
-                "https://iotpush.com/api/push/$CURRENT_TOPIC" 2>/dev/null) && {
+                "https://www.iotpush.com/api/push/$CURRENT_TOPIC" 2>/dev/null) && {
                 echo -e "  $(gum style --foreground 76 '✓ Push sent successfully')"
                 echo -e "  $(gum style --faint "$RESP")"
             } || {
@@ -636,7 +636,7 @@ do_iotpush() {
                 -H "Authorization: Bearer $NEW_KEY" \
                 -H "Content-Type: application/json" \
                 -d '{"title":"Pi Setup","message":"iotPush credentials verified!"}' \
-                "https://iotpush.com/api/push/$NEW_TOPIC" 2>/dev/null) && {
+                "https://www.iotpush.com/api/push/$NEW_TOPIC" 2>/dev/null) && {
                 echo -e "  $(gum style --foreground 76 '✓ Credentials valid — test push delivered')"
             } || {
                 echo -e "  $(gum style --foreground 214 '⚠ Could not verify — saving anyway')"
