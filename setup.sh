@@ -738,6 +738,174 @@ with open('$SETTINGS_FILE', 'w') as f:
     echo ""
 }
 
+do_tailscale() {
+    clear
+    show_banner
+
+    gum style --bold --foreground 36 "  🔗 Tailscale"
+    echo ""
+
+    if command -v tailscale &>/dev/null; then
+        # Show current status
+        TS_STATUS=$(tailscale status 2>/dev/null || echo "not connected")
+        TS_IP=$(tailscale ip -4 2>/dev/null || echo "N/A")
+        TS_VERSION=$(tailscale version 2>/dev/null | head -1)
+
+        echo -e "  Status:   $(gum style --foreground 76 '● Installed')"
+        echo -e "  Version:  $(gum style --faint "$TS_VERSION")"
+        echo -e "  IP:       $(gum style --foreground 76 "$TS_IP")"
+        echo -e "  $(gum style --faint 'Install URL: https://login.tailscale.com/admin/settings/keys')"
+        echo ""
+
+        # Check if connected
+        if echo "$TS_STATUS" | grep -q "stopped\|not running"; then
+            ACTION=$(gum choose \
+                --cursor="▸ " \
+                --cursor.foreground 36 \
+                --selected.foreground 36 \
+                "🔐  Connect (Auth Key)" \
+                "🌐  Connect (Interactive Login)" \
+                "🔄  Update Tailscale" \
+                "🗑   Uninstall Tailscale" \
+                "↩   Back")
+        else
+            ACTION=$(gum choose \
+                --cursor="▸ " \
+                --cursor.foreground 36 \
+                --selected.foreground 36 \
+                "📊  Show Status" \
+                "🔑  Generate Auth Key Info" \
+                "🔄  Update Tailscale" \
+                "🔌  Disconnect" \
+                "🗑   Uninstall Tailscale" \
+                "↩   Back")
+        fi
+    else
+        echo -e "  Status: $(gum style --faint '○ Not installed')"
+        echo ""
+        echo -e "  $(gum style --faint 'Tailscale creates a secure mesh VPN for your devices')"
+        echo -e "  $(gum style --faint 'All traffic is encrypted — no open ports needed')"
+        echo ""
+
+        ACTION=$(gum choose \
+            --cursor="▸ " \
+            --cursor.foreground 36 \
+            --selected.foreground 36 \
+            "📦  Install Tailscale" \
+            "↩   Back")
+    fi
+
+    case "$ACTION" in
+        *"Install"*)
+            echo ""
+            echo -e "${YELLOW}Installing Tailscale...${NC}"
+            curl -fsSL https://tailscale.com/install.sh | sh
+            echo ""
+            echo -e "  $(gum style --foreground 76 '✓ Tailscale installed')"
+            echo ""
+
+            # Offer to connect
+            gum confirm "  Connect to Tailscale now?" && {
+                echo ""
+                AUTH_KEY=$(gum input --prompt "  Auth Key (tskey-auth-...): " --password)
+                if [ -n "$AUTH_KEY" ]; then
+                    HOSTNAME_VAL=$(hostname)
+                    tailscale up --authkey="$AUTH_KEY" --ssh --hostname="$HOSTNAME_VAL" 2>/dev/null && {
+                        NEW_IP=$(tailscale ip -4 2>/dev/null || echo "pending")
+                        echo -e "  $(gum style --foreground 76 '✓ Connected!')"
+                        echo -e "  Tailscale IP: $(gum style --foreground 76 "$NEW_IP")"
+                    } || {
+                        echo -e "  $(gum style --foreground 214 '✗ Connection failed — try interactive login')"
+                        echo -e "  $(gum style --faint 'Run: tailscale up')"
+                    }
+                else
+                    echo -e "  $(gum style --faint 'Skipped — run `tailscale up` to connect later')"
+                fi
+            }
+            echo ""
+            ;;
+
+        *"Connect (Auth Key)"*)
+            echo ""
+            AUTH_KEY=$(gum input --prompt "  Auth Key (tskey-auth-...): " --password)
+            if [ -n "$AUTH_KEY" ]; then
+                HOSTNAME_VAL=$(hostname)
+                echo -e "  ${YELLOW}Connecting...${NC}"
+                tailscale up --authkey="$AUTH_KEY" --ssh --hostname="$HOSTNAME_VAL" 2>/dev/null && {
+                    NEW_IP=$(tailscale ip -4 2>/dev/null || echo "pending")
+                    echo -e "  $(gum style --foreground 76 '✓ Connected!')"
+                    echo -e "  Tailscale IP: $(gum style --foreground 76 "$NEW_IP")"
+                } || {
+                    echo -e "  $(gum style --foreground 214 '✗ Connection failed')"
+                }
+            fi
+            echo ""
+            ;;
+
+        *"Connect (Interactive"*)
+            echo ""
+            echo -e "  ${YELLOW}Starting interactive login...${NC}"
+            echo -e "  $(gum style --faint 'A login URL will appear — open it in your browser')"
+            echo ""
+            tailscale up --ssh 2>&1 || true
+            echo ""
+            NEW_IP=$(tailscale ip -4 2>/dev/null || echo "N/A")
+            echo -e "  Tailscale IP: $(gum style --foreground 76 "$NEW_IP")"
+            echo ""
+            ;;
+
+        *"Status"*)
+            echo ""
+            tailscale status
+            echo ""
+            echo ""
+            ;;
+
+        *"Auth Key Info"*)
+            echo ""
+            echo -e "  $(gum style --bold 'Generate Auth Keys at:')"
+            echo -e "  $(gum style --foreground 36 'https://login.tailscale.com/admin/settings/keys')"
+            echo ""
+            echo -e "  $(gum style --faint 'Tip: Create a reusable key for multiple devices')"
+            echo ""
+            ;;
+
+        *"Update"*)
+            echo ""
+            echo -e "  ${YELLOW}Updating Tailscale...${NC}"
+            curl -fsSL https://tailscale.com/install.sh | sh
+            echo -e "  $(gum style --foreground 76 '✓ Tailscale updated')"
+            NEW_VER=$(tailscale version 2>/dev/null | head -1)
+            echo -e "  Version: $(gum style --foreground 76 "$NEW_VER")"
+            echo ""
+            ;;
+
+        *"Disconnect"*)
+            echo ""
+            gum confirm "  Disconnect from Tailscale?" || return
+            tailscale down 2>/dev/null
+            echo -e "  $(gum style --foreground 76 '✓ Disconnected')"
+            echo ""
+            ;;
+
+        *"Uninstall"*)
+            echo ""
+            gum confirm --default=false "  Uninstall Tailscale? This removes mesh VPN access." || return
+            echo ""
+            tailscale down 2>/dev/null || true
+            tailscale logout 2>/dev/null || true
+            systemctl stop tailscaled 2>/dev/null || true
+            systemctl disable tailscaled 2>/dev/null || true
+            apt-get remove -y -qq tailscale 2>/dev/null || true
+            echo -e "  $(gum style --foreground 76 '✓ Tailscale removed')"
+            echo -e "  $(gum style --faint 'Note: agent may need reconfiguration without Tailscale')"
+            echo ""
+            ;;
+
+        *"Back"*) return ;;
+    esac
+}
+
 do_remote_desktop() {
     clear
     show_banner
@@ -1139,9 +1307,10 @@ main() {
                 --cursor="▸ " \
                 --cursor.foreground 36 \
                 --selected.foreground 36 \
-                --height 10 \
+                --height 12 \
                 "📊  Status" \
                 "🔔  iotPush" \
+                "🔗  Tailscale" \
                 "🖥   Remote Desktop" \
                 "🔄  Update Agent" \
                 "🗑   Uninstall Agent" \
@@ -1160,6 +1329,7 @@ main() {
             *"Install"*) do_install ;;
             *"Status"*)  do_status ;;
             *"iotPush"*)  do_iotpush ;;
+            *"Tailscale"*) do_tailscale ;;
             *"Remote"*)  do_remote_desktop ;;
             *"Update"*)  do_update ;;
             *"Uninstall"*) do_uninstall ;;
