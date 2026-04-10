@@ -738,6 +738,332 @@ with open('$SETTINGS_FILE', 'w') as f:
     echo ""
 }
 
+do_remote_desktop() {
+    clear
+    show_banner
+
+    gum style --bold --foreground 36 "  🖥  Remote Desktop (VNC)"
+    echo ""
+    gum style --faint "  Access your device desktop from iOS via Tailscale + VNC"
+    echo ""
+
+    # Detect current state
+    VNC_INSTALLED=false
+    DESKTOP_INSTALLED=false
+    VNC_RUNNING=false
+
+    command -v vncserver &>/dev/null && VNC_INSTALLED=true
+    dpkg -l xfce4 &>/dev/null 2>&1 && dpkg -l xfce4 2>/dev/null | grep -q '^ii' && DESKTOP_INSTALLED=true
+    systemctl is-active --quiet vncserver@:1 2>/dev/null && VNC_RUNNING=true
+
+    # Show current state
+    if [ "$VNC_RUNNING" = true ]; then
+        echo -e "  Status: $(gum style --foreground 76 '● VNC is running')"
+        if command -v tailscale &>/dev/null; then
+            TS_IP=$(tailscale ip -4 2>/dev/null || echo "N/A")
+        else
+            TS_IP=$(hostname -I | awk '{print $1}')
+        fi
+        echo -e "  Connect: $(gum style --foreground 76 "$TS_IP:5901")"
+        echo -e "  $(gum style --faint 'Use RealVNC Viewer or Screens 5 on iOS')"
+    elif [ "$VNC_INSTALLED" = true ]; then
+        echo -e "  Status: $(gum style --foreground 214 '● VNC installed but not running')"
+    else
+        echo -e "  Status: $(gum style --faint '○ Not installed')"
+    fi
+    echo ""
+
+    if [ "$VNC_RUNNING" = true ]; then
+        ACTION=$(gum choose \
+            --cursor="▸ " \
+            --cursor.foreground 36 \
+            --selected.foreground 36 \
+            "🛑  Stop VNC" \
+            "🔑  Change VNC Password" \
+            "🗑   Uninstall Remote Desktop" \
+            "↩   Back")
+    elif [ "$VNC_INSTALLED" = true ]; then
+        ACTION=$(gum choose \
+            --cursor="▸ " \
+            --cursor.foreground 36 \
+            --selected.foreground 36 \
+            "▶️   Start VNC" \
+            "🔑  Change VNC Password" \
+            "🗑   Uninstall Remote Desktop" \
+            "↩   Back")
+    else
+        ACTION=$(gum choose \
+            --cursor="▸ " \
+            --cursor.foreground 36 \
+            --selected.foreground 36 \
+            "📦  Install Remote Desktop" \
+            "↩   Back")
+    fi
+
+    case "$ACTION" in
+        *"Install"*)
+            _install_remote_desktop
+            ;;
+
+        *"Start"*)
+            echo ""
+            systemctl start vncserver@:1 2>/dev/null && {
+                echo -e "  $(gum style --foreground 76 '✓ VNC started')"
+            } || {
+                vncserver :1 -geometry 1280x720 -depth 24 2>/dev/null && {
+                    echo -e "  $(gum style --foreground 76 '✓ VNC started')"
+                } || {
+                    echo -e "  $(gum style --foreground 214 '✗ Failed to start VNC')"
+                }
+            }
+            echo ""
+            gum style --faint "  Connect with VNC client to $(hostname -I | awk '{print $1}'):5901"
+            echo ""
+            ;;
+
+        *"Stop"*)
+            echo ""
+            systemctl stop vncserver@:1 2>/dev/null
+            vncserver -kill :1 2>/dev/null || true
+            echo -e "  $(gum style --foreground 76 '✓ VNC stopped')"
+            echo ""
+            ;;
+
+        *"Password"*)
+            echo ""
+            _set_vnc_password
+            ;;
+
+        *"Uninstall"*)
+            echo ""
+            gum confirm --default=false "  Uninstall remote desktop? (removes VNC + XFCE)" || return
+            echo ""
+            echo -e "  ${YELLOW}Stopping VNC...${NC}"
+            systemctl stop vncserver@:1 2>/dev/null || true
+            systemctl disable vncserver@:1 2>/dev/null || true
+            rm -f /etc/systemd/system/vncserver@.service
+            systemctl daemon-reload
+            vncserver -kill :1 2>/dev/null || true
+
+            echo -e "  ${YELLOW}Removing packages...${NC}"
+            apt-get remove -y -qq tigervnc-standalone-server xfce4 xfce4-goodies 2>/dev/null || true
+            apt-get autoremove -y -qq 2>/dev/null || true
+            rm -rf /root/.vnc /home/*/.vnc
+
+            echo -e "  $(gum style --foreground 76 '✓ Remote desktop removed')"
+            echo ""
+            ;;
+
+        *"Back"*) return ;;
+    esac
+}
+
+_install_remote_desktop() {
+    echo ""
+    gum style --bold "  This will install:"
+    echo -e "    $(gum style --faint '•') XFCE4 desktop environment (~300MB)"
+    echo -e "    $(gum style --faint '•') TigerVNC server"
+    echo -e "    $(gum style --faint '•') Systemd service (auto-start)"
+    echo ""
+
+    if command -v tailscale &>/dev/null; then
+        echo -e "  $(gum style --foreground 76 '🔒 Secured: VNC will only listen on Tailscale (100.x.x.x)')"
+    else
+        echo -e "  $(gum style --foreground 214 '⚠ No Tailscale — VNC will listen on all interfaces')"
+    fi
+    echo ""
+
+    gum confirm "  Continue with installation?" || return
+    echo ""
+
+    # ── Step 1: Desktop environment ──
+    STEP=1
+    TOTAL=4
+
+    echo -e "${YELLOW}[$STEP/$TOTAL] Installing XFCE4 desktop environment...${NC}"
+    echo -e "  $(gum style --faint 'This may take a few minutes on first install...')"
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y -qq xfce4 xfce4-goodies dbus-x11 2>&1 | tail -1
+    echo -e "  $(gum style --foreground 76 '✓ XFCE4 installed')"
+    echo ""
+
+    # ── Step 2: VNC server ──
+    STEP=$((STEP + 1))
+    echo -e "${YELLOW}[$STEP/$TOTAL] Installing TigerVNC...${NC}"
+    apt-get install -y -qq tigervnc-standalone-server tigervnc-common
+    echo -e "  $(gum style --foreground 76 '✓ TigerVNC installed')"
+    echo ""
+
+    # ── Step 3: Configure ──
+    STEP=$((STEP + 1))
+    echo -e "${YELLOW}[$STEP/$TOTAL] Configuring VNC...${NC}"
+
+    # Set VNC password
+    _set_vnc_password
+
+    # Determine the user
+    VNC_USER="${SUDO_USER:-root}"
+    VNC_HOME=$(eval echo ~"$VNC_USER")
+
+    # Create VNC config directory
+    mkdir -p "$VNC_HOME/.vnc"
+    chown "$VNC_USER" "$VNC_HOME/.vnc"
+
+    # xstartup script
+    cat > "$VNC_HOME/.vnc/xstartup" << 'XSTARTUP'
+#!/bin/sh
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+export XDG_SESSION_TYPE=x11
+
+[ -f /etc/X11/xinit/xinitrc ] && . /etc/X11/xinit/xinitrc
+
+# Start XFCE
+exec startxfce4
+XSTARTUP
+    chmod +x "$VNC_HOME/.vnc/xstartup"
+    chown "$VNC_USER" "$VNC_HOME/.vnc/xstartup"
+
+    # VNC server config — restrict to localhost (Tailscale/proxy will handle external)
+    cat > "$VNC_HOME/.vnc/config" << 'VNCCONFIG'
+## Security types
+SecurityTypes=VncAuth
+
+## Only listen on localhost (use SSH tunnel or Tailscale for remote access)
+localhost=yes
+
+## Display settings
+geometry=1280x720
+depth=24
+VNCCONFIG
+    chown "$VNC_USER" "$VNC_HOME/.vnc/config"
+
+    echo -e "  $(gum style --foreground 76 '✓ VNC configured')"
+    echo -e "  $(gum style --faint '  Listening: localhost only (port 5901)')"
+    echo ""
+
+    # ── Step 4: Systemd service ──
+    STEP=$((STEP + 1))
+    echo -e "${YELLOW}[$STEP/$TOTAL] Setting up systemd service...${NC}"
+
+    cat > /etc/systemd/system/vncserver@.service << 'SERVICE'
+[Unit]
+Description=TigerVNC server for display %i
+After=network.target
+
+[Service]
+Type=forking
+User=%i
+Group=%i
+ExecStartPre=/usr/bin/vncserver -kill %i > /dev/null 2>&1 || true
+ExecStart=/usr/bin/vncserver %i -geometry 1280x720 -depth 24 -localhost yes
+ExecStop=/usr/bin/vncserver -kill %i
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+    # If running as root, also create the user-specific service
+    if [ "$VNC_USER" = "root" ]; then
+        cat > /etc/systemd/system/vncserver@:1.service << 'ROOTSERVICE'
+[Unit]
+Description=TigerVNC server for display :1
+After=network.target
+
+[Service]
+Type=forking
+User=root
+ExecStartPre=/usr/bin/vncserver -kill :1 > /dev/null 2>&1 || true
+ExecStart=/usr/bin/vncserver :1 -geometry 1280x720 -depth 24 -localhost yes
+ExecStop=/usr/bin/vncserver -kill :1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+ROOTSERVICE
+
+        systemctl daemon-reload
+        systemctl enable vncserver@:1
+        systemctl start vncserver@:1
+    else
+        systemctl daemon-reload
+        systemctl enable vncserver@"${VNC_USER}"
+        systemctl start vncserver@"${VNC_USER}"
+    fi
+
+    echo -e "  $(gum style --foreground 76 '✓ Service installed and started')"
+    echo ""
+
+    # ── Done ──
+    if command -v tailscale &>/dev/null; then
+        CONNECT_IP=$(tailscale ip -4 2>/dev/null || echo "$(hostname -I | awk '{print $1}')")
+    else
+        CONNECT_IP=$(hostname -I | awk '{print $1}')
+    fi
+
+    echo ""
+    gum style \
+        --border double \
+        --border-foreground 76 \
+        --margin "1 2" \
+        --padding "1 4" \
+        "$(gum style --bold --foreground 76 '🖥  Remote Desktop Ready!')"
+    echo ""
+    echo -e "  Connect from iOS:"
+    echo -e "    $(gum style --bold '1.') Install $(gum style --foreground 36 'RealVNC Viewer') or $(gum style --foreground 36 'Screens 5') from App Store"
+    echo -e "    $(gum style --bold '2.') Set up SSH tunnel (VNC is localhost-only):"
+    echo -e "       $(gum style --faint 'ssh -L 5901:localhost:5901 root@$CONNECT_IP')"
+    echo -e "    $(gum style --bold '3.') Connect VNC client to:"
+    echo -e "       $(gum style --foreground 76 'localhost:5901')"
+    echo ""
+    echo -e "  $(gum style --faint 'Tip: On Tailscale, you can SSH tunnel from iOS using Termius or Blink Shell')"
+    echo ""
+
+    # Send iotPush notification
+    if [ -f /etc/pi-zero-trust/.env ]; then
+        IOTPUSH_KEY_VAL=$(grep '^IOTPUSH_API_KEY=' /etc/pi-zero-trust/.env 2>/dev/null | cut -d= -f2)
+        IOTPUSH_TOPIC_VAL=$(grep '^IOTPUSH_TOPIC=' /etc/pi-zero-trust/.env 2>/dev/null | cut -d= -f2)
+        if [ -n "$IOTPUSH_KEY_VAL" ] && [ -n "$IOTPUSH_TOPIC_VAL" ]; then
+            curl -sfL --connect-timeout 5 \
+                -H "Authorization: Bearer $IOTPUSH_KEY_VAL" \
+                -H "Content-Type: application/json" \
+                -d '{"title":"🖥 Remote Desktop Ready","message":"VNC is running. Connect via SSH tunnel.","priority":"normal"}' \
+                "https://www.iotpush.com/api/push/$IOTPUSH_TOPIC_VAL" 2>/dev/null || true
+        fi
+    fi
+}
+
+_set_vnc_password() {
+    echo -e "  $(gum style --bold 'Set VNC password')"
+    echo -e "  $(gum style --faint 'This password is required to connect from your iOS device')"
+    echo ""
+
+    VNC_PASS=$(gum input --prompt "  VNC Password: " --password)
+    if [ -z "$VNC_PASS" ]; then
+        echo -e "  $(gum style --foreground 214 'Password cannot be empty')"
+        return 1
+    fi
+
+    VNC_USER="${SUDO_USER:-root}"
+    VNC_HOME=$(eval echo ~"$VNC_USER")
+    mkdir -p "$VNC_HOME/.vnc"
+
+    # Set password using vncpasswd
+    echo "$VNC_PASS" | vncpasswd -f > "$VNC_HOME/.vnc/passwd"
+    chmod 600 "$VNC_HOME/.vnc/passwd"
+    chown "$VNC_USER" "$VNC_HOME/.vnc/passwd"
+
+    # Also set view-only password to no
+    echo "$VNC_PASS\nn" | vncpasswd 2>/dev/null || true
+
+    echo -e "  $(gum style --foreground 76 '✓ VNC password set')"
+    echo ""
+}
+
 do_status() {
     clear
     show_banner
@@ -813,9 +1139,10 @@ main() {
                 --cursor="▸ " \
                 --cursor.foreground 36 \
                 --selected.foreground 36 \
-                --height 8 \
+                --height 10 \
                 "📊  Status" \
                 "🔔  iotPush" \
+                "🖥   Remote Desktop" \
                 "🔄  Update Agent" \
                 "🗑   Uninstall Agent" \
                 "🚪  Exit")
@@ -833,6 +1160,7 @@ main() {
             *"Install"*) do_install ;;
             *"Status"*)  do_status ;;
             *"iotPush"*)  do_iotpush ;;
+            *"Remote"*)  do_remote_desktop ;;
             *"Update"*)  do_update ;;
             *"Uninstall"*) do_uninstall ;;
             *"Exit"*)    echo -e "\n$(gum style --faint 'Bye! 👋')\n"; exit 0 ;;
