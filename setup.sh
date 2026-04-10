@@ -479,10 +479,7 @@ except: pass
         echo -e "  $(gum style --foreground 214 '⚠ Agent may need a moment — check: journalctl -u pi-monitor -n 20')"
     fi
     echo ""
-    gum confirm "  View live logs?" && {
-        echo ""
-        journalctl -u pi-monitor -f --no-pager -n 20
-    }
+    echo -e "  $(gum style --faint 'Returning to menu...')"
 }
 
 do_uninstall() {
@@ -1311,9 +1308,8 @@ main() {
             *)           exit 0 ;;
         esac
 
-        # Pause before returning to menu
-        echo ""
-        read -t 3 -p "  Press Enter to return to menu..." 2>/dev/null || echo ""
+        # Brief pause before returning to menu
+        sleep 1
     done
 }
 
