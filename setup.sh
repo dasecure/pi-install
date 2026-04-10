@@ -87,7 +87,7 @@ show_banner() {
         --padding "1 4" \
         "$(gum style --bold --foreground 36 '🔒 Pi Zero-Trust Agent')"
     echo ""
-    gum style --dim "  Interactive Setup — no CLI flags needed"
+    gum style --faint "  Interactive Setup — no CLI flags needed"
     echo ""
 }
 
@@ -116,7 +116,7 @@ show_success_banner() {
     echo -e "  API:        $(gum style --foreground 76 "http://$ip:8080")"
     echo -e "  Token:      $(gum style --foreground 214 "$token")"
     echo ""
-    echo -e "  $(gum style --dim 'Test: curl http://'$ip':8080/health')"
+    echo -e "  $(gum style --faint 'Test: curl http://'$ip':8080/health')"
     echo ""
 }
 
@@ -153,7 +153,7 @@ do_install() {
     fi
 
     echo ""
-    gum style --dim "  Selected: $MODE"
+    gum style --faint "  Selected: $MODE"
     echo ""
 
     # ── Step 2: Hostname ──
@@ -175,7 +175,7 @@ do_install() {
 
     # iotPush
     gum style "  $(gum style --bold 'iotPush') — push notifications"
-    echo "  $(gum style --dim 'Get your key: https://iotpush.com/settings')"
+    echo "  $(gum style --faint 'Get your key: https://iotpush.com/settings')"
     echo ""
 
     gum confirm "  Configure iotPush?" && {
@@ -206,7 +206,7 @@ do_install() {
     # Tailscale (Pi mode only)
     if [ "$NO_TAILSCALE" = false ]; then
         gum style "  $(gum style --bold 'Tailscale') — secure mesh VPN"
-        echo "  $(gum style --dim 'Get your key: https://login.tailscale.com/admin/settings/keys')"
+        echo "  $(gum style --faint 'Get your key: https://login.tailscale.com/admin/settings/keys')"
         echo ""
 
         TAILSCALE_KEY=$(gum_input "  Tailscale Auth Key: " "" "--password")
@@ -250,12 +250,12 @@ do_install() {
     if [ -n "$IOTPUSH_KEY" ]; then
         echo -e "  iotPush:     $(gum style --foreground 76 'configured')"
     else
-        echo -e "  iotPush:     $(gum style --dim 'skipped')"
+        echo -e "  iotPush:     $(gum style --faint 'skipped')"
     fi
     if [ "$NO_TAILSCALE" = false ]; then
         echo -e "  Tailscale:   $(gum style --foreground 76 'enabled')"
     else
-        echo -e "  Tailscale:   $(gum style --dim 'disabled')"
+        echo -e "  Tailscale:   $(gum style --faint 'disabled')"
     fi
     if [ -n "$WATCHDOG_FLAG" ]; then
         echo -e "  Watchdog:    $(gum style --foreground 76 'enabled')"
@@ -263,7 +263,7 @@ do_install() {
     if [ -n "$API_TOKEN" ]; then
         echo -e "  API Token:   $(gum style --foreground 214 'custom')"
     else
-        echo -e "  API Token:   $(gum style --dim 'auto-generated')"
+        echo -e "  API Token:   $(gum style --faint 'auto-generated')"
     fi
     echo ""
 
@@ -356,10 +356,10 @@ do_post_install() {
     TEST_IP="${INSTALLED_IP:-$(hostname -I | awk '{print $1}')}"
     HEALTH_RESULT=$(curl -sf --connect-timeout 5 "http://${TEST_IP}:8080/health" 2>/dev/null) && {
         echo -e "  $(gum style --foreground 76 '✓ Agent is healthy')"
-        echo -e "  $(gum style --dim "$HEALTH_RESULT")"
+        echo -e "  $(gum style --faint "$HEALTH_RESULT")"
     } || {
         echo -e "  $(gum style --foreground 214 '⚠ Agent not responding yet — may need a moment')"
-        echo -e "  $(gum style --dim "Retry: curl http://${TEST_IP}:8080/health")"
+        echo -e "  $(gum style --faint "Retry: curl http://${TEST_IP}:8080/health")"
     }
     echo ""
 
@@ -378,7 +378,7 @@ do_post_install() {
                     "https://iotpush.com/api/push/$IOTPUSH_TOPIC_VAL" 2>/dev/null) && {
                     echo -e "  $(gum style --foreground 76 '✓ Test notification sent')"
                     if [ -n "$TEST_RESP" ]; then
-                        echo -e "  $(gum style --dim "$TEST_RESP")"
+                        echo -e "  $(gum style --faint "$TEST_RESP")"
                     fi
                 } || {
                     echo -e "  $(gum style --foreground 214 '⚠ Could not send test notification')"
@@ -415,16 +415,16 @@ except ImportError:
         echo -e "  $(gum style --foreground 76 '● pi-monitor is running')"
     else
         echo -e "  $(gum style --foreground 214 '● pi-monitor is not running')"
-        echo -e "  $(gum style --dim '  Start: sudo systemctl start pi-monitor')"
-        echo -e "  $(gum style --dim '  Logs:  journalctl -u pi-monitor -f')"
+        echo -e "  $(gum style --faint '  Start: sudo systemctl start pi-monitor')"
+        echo -e "  $(gum style --faint '  Logs:  journalctl -u pi-monitor -f')"
     fi
     echo ""
 
-    gum style --dim "  Useful commands:"
-    echo -e "  $(gum style --dim 'View logs:  ')journalctl -u pi-monitor -f"
-    echo -e "  $(gum style --dim 'Restart:    ')sudo systemctl restart pi-monitor"
-    echo -e "  $(gum style --dim 'Uninstall:  ')sudo bash $(dirname "$0")/setup.sh  # → choose Uninstall"
-    echo -e "  $(gum style --dim 'Status:     ')curl http://${INSTALLED_IP}:8080/health"
+    gum style --faint "  Useful commands:"
+    echo -e "  $(gum style --faint 'View logs:  ')journalctl -u pi-monitor -f"
+    echo -e "  $(gum style --faint 'Restart:    ')sudo systemctl restart pi-monitor"
+    echo -e "  $(gum style --faint 'Uninstall:  ')sudo bash $(dirname "$0")/setup.sh  # → choose Uninstall"
+    echo -e "  $(gum style --faint 'Status:     ')curl http://${INSTALLED_IP}:8080/health"
     echo ""
 
     gum style --bold --foreground 36 "  Done! 🖖"
@@ -502,7 +502,7 @@ do_uninstall() {
     echo -e "    $(gum style --foreground 214 '•') /var/www/pi-pages/ (pages)"
     echo -e "    $(gum style --foreground 214 '•') /usr/local/bin/pi-notify"
     echo ""
-    echo -e "  $(gum style --dim 'Tailscale will NOT be removed.')"
+    echo -e "  $(gum style --faint 'Tailscale will NOT be removed.')"
     echo ""
 
     gum confirm --default=false "  Are you sure you want to uninstall?" || {
@@ -547,7 +547,7 @@ do_uninstall() {
         "$(gum style --bold --foreground 214 '🗑  Agent Uninstalled')"
     echo ""
     echo -e "  Tailscale was $(gum style --bold 'not') removed."
-    echo -e "  $(gum style --dim 'To remove Tailscale: sudo tailscale logout && sudo apt remove tailscale')"
+    echo -e "  $(gum style --faint 'To remove Tailscale: sudo tailscale logout && sudo apt remove tailscale')"
     echo ""
 }
 
@@ -557,7 +557,7 @@ do_iotpush() {
 
     gum style --bold --foreground 36 "  🔔 iotPush Configuration"
     echo ""
-    gum style --dim "  Push notifications via iotpush.com/api/push/{topic}"
+    gum style --faint "  Push notifications via iotpush.com/api/push/{topic}"
     echo ""
 
     ENV_FILE="/etc/pi-zero-trust/.env"
@@ -587,7 +587,7 @@ do_iotpush() {
     else
         echo -e "  $(gum style --foreground 214 'iotPush not configured')"
         echo ""
-        echo -e "  $(gum style --dim 'Get your key & topic: https://iotpush.com/settings')"
+        echo -e "  $(gum style --faint 'Get your key & topic: https://iotpush.com/settings')"
         echo ""
 
         ACTION=$(gum choose \
@@ -609,7 +609,7 @@ do_iotpush() {
                 -d "{\"title\":\"🧪 Test from $HOSTNAME_DISPLAY\",\"message\":\"iotPush is working! Sent from Pi Zero-Trust setup TUI.\",\"priority\":\"normal\"}" \
                 "https://iotpush.com/api/push/$CURRENT_TOPIC" 2>/dev/null) && {
                 echo -e "  $(gum style --foreground 76 '✓ Push sent successfully')"
-                echo -e "  $(gum style --dim "$RESP")"
+                echo -e "  $(gum style --faint "$RESP")"
             } || {
                 echo -e "  $(gum style --foreground 214 '✗ Push failed — check credentials')"
             }
@@ -617,8 +617,8 @@ do_iotpush() {
 
         *"Update"*|*"Set Up"*)
             echo ""
-            echo -e "  $(gum style --dim 'Enter your iotPush credentials')"
-            echo -e "  $(gum style --dim 'Get them at: https://iotpush.com/settings')"
+            echo -e "  $(gum style --faint 'Enter your iotPush credentials')"
+            echo -e "  $(gum style --faint 'Get them at: https://iotpush.com/settings')"
             echo ""
 
             NEW_KEY=$(gum_input "  API Key: " "${CURRENT_KEY}" "--password")
@@ -682,8 +682,8 @@ with open('$SETTINGS_FILE', 'w') as f:
             systemctl restart pi-monitor 2>/dev/null || true
 
             echo -e "  $(gum style --foreground 76 '✓ iotPush configured and saved')"
-            echo -e "  $(gum style --dim '  Config: $ENV_FILE')"
-            echo -e "  $(gum style --dim '  Helper: /usr/local/bin/pi-notify')"
+            echo -e "  $(gum style --faint '  Config: $ENV_FILE')"
+            echo -e "  $(gum style --faint '  Helper: /usr/local/bin/pi-notify')"
             ;;
 
         *"Disable"*)
@@ -749,7 +749,7 @@ do_status() {
     # Quick health check
     HEALTH_RESULT=$(curl -sf --connect-timeout 3 "http://${INSTALLED_IP:-localhost}:8080/health" 2>/dev/null) && {
         echo -e "  Health:    $(gum style --foreground 76 '✓ Responding')"
-        echo -e "  $(gum style --dim "$HEALTH_RESULT")"
+        echo -e "  $(gum style --faint "$HEALTH_RESULT")"
     } || {
         echo -e "  Health:    $(gum style --foreground 214 '⚠ Not responding')"
     }
@@ -809,7 +809,7 @@ main() {
             *"iotPush"*)  do_iotpush ;;
             *"Update"*)  do_update ;;
             *"Uninstall"*) do_uninstall ;;
-            *"Exit"*)    echo -e "\n$(gum style --dim 'Bye! 👋')\n"; exit 0 ;;
+            *"Exit"*)    echo -e "\n$(gum style --faint 'Bye! 👋')\n"; exit 0 ;;
             *)           exit 0 ;;
         esac
 
