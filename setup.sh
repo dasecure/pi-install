@@ -1339,7 +1339,7 @@ main() {
 
         # Pause before returning to menu
         echo ""
-        gum confirm "  Return to menu?" || return
+        read -t 3 -p "  Press Enter to return to menu..." 2>/dev/null || echo ""
     done
 }
 
