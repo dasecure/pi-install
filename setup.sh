@@ -1224,6 +1224,66 @@ _set_vnc_password() {
     echo ""
 }
 
+do_qrcode() {
+    clear
+    show_banner
+
+    gum style --bold --foreground 36 "  📱 QR Code for PiControl"
+    echo ""
+
+    if [ ! -f /etc/pi-zero-trust/.env ]; then
+        echo -e "  $(gum style --foreground 214 'Agent not installed — no QR to show')"
+        echo ""
+        return
+    fi
+
+    TOKEN=$(grep '^PI_API_TOKEN=' /etc/pi-zero-trust/.env 2>/dev/null | cut -d= -f2)
+    HOSTNAME_VAL=$(grep '^PI_HOSTNAME=' /etc/pi-zero-trust/.env 2>/dev/null | cut -d= -f2)
+    HOSTNAME_VAL="${HOSTNAME_VAL:-$(hostname)}"
+    TAILSCALE_ONLY=$(grep '^TAILSCALE_ONLY=' /etc/pi-zero-trust/.env 2>/dev/null | cut -d= -f2)
+
+    if command -v tailscale &>/dev/null; then
+        IP=$(tailscale ip -4 2>/dev/null || hostname -I | awk '{print $1}')
+    else
+        IP=$(hostname -I | awk '{print $1}')
+    fi
+
+    DEVICE_TYPE=$([ "$TAILSCALE_ONLY" = "true" ] && echo 'pi' || echo 'vps')
+
+    echo -e "  Hostname: $(gum style --foreground 76 "$HOSTNAME_VAL")"
+    echo -e "  IP:       $(gum style --foreground 76 "$IP")"
+    echo -e "  Token:    $(gum style --foreground 214 "${TOKEN:0:8}...")"
+    echo ""
+
+    QR_DATA="{\"h\":\"$HOSTNAME_VAL\",\"a\":\"$IP\",\"p\":8080,\"t\":\"$TOKEN\",\"d\":\"$DEVICE_TYPE\"}"
+
+    # Try python qrcode first
+    if [ -x /opt/pi-utility/venv/bin/python3 ]; then
+        /opt/pi-utility/venv/bin/python3 -c "
+import sys
+try:
+    import qrcode
+    qr = qrcode.QRCode(border=1)
+    qr.add_data(sys.argv[1])
+    qr.make(fit=True)
+    qr.print_ascii(invert=True)
+except ImportError:
+    print('qrcode not installed')
+" "$QR_DATA" 2>/dev/null
+    elif command -v qrencode &>/dev/null; then
+        qrencode -t ANSI "$QR_DATA"
+    else
+        echo -e "  $(gum style --faint 'QR code tools not available. Install with:')"
+        echo -e "  $(gum style --faint '/opt/pi-utility/venv/bin/pip install qrcode[pil]')"
+        echo ""
+        echo -e "  $(gum style --faint 'Or scan this data manually:')"
+        echo -e "  $QR_DATA"
+    fi
+    echo ""
+    echo -e "  $(gum style --foreground 36 '📱 Scan in PiControl app → Settings → Scan QR')"
+    echo ""
+}
+
 do_status() {
     clear
     show_banner
@@ -1299,8 +1359,9 @@ main() {
                 --cursor="▸ " \
                 --cursor.foreground 36 \
                 --selected.foreground 36 \
-                --height 12 \
+                --height 14 \
                 "📊  Status" \
+                "📱  Show QR Code" \
                 "🔔  iotPush" \
                 "🔗  Tailscale" \
                 "🖥   Remote Desktop" \
@@ -1320,6 +1381,7 @@ main() {
         case "$CHOICE" in
             *"Install"*) do_install ;;
             *"Status"*)  do_status ;;
+            *"QR"*)      do_qrcode ;;
             *"iotPush"*)  do_iotpush ;;
             *"Tailscale"*) do_tailscale ;;
             *"Remote"*)  do_remote_desktop ;;
