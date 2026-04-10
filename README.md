@@ -2,6 +2,24 @@
 
 Self-contained install script for the [Pi Zero-Trust](https://github.com/dasecure/pi-zero-trust) agent. Sets up the monitoring agent on any Linux machine — no git clone needed, all files are embedded in the script.
 
+## Interactive Setup (recommended)
+
+Guided TUI with prompts — no CLI flags to remember:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dasecure/pi-install/main/setup.sh | sudo bash
+```
+
+<img width="400" alt="TUI menu">
+
+Features:
+- 🚀 Install with guided prompts (Pi or VPS mode)
+- 🔄 One-click update
+- 🗑 Confirmed uninstall
+- 📊 Status dashboard
+- 📱 Post-install QR code + health check + test notification
+- Auto-installs `gum` if missing
+
 ## Install on Pi (with Tailscale)
 
 ```bash
