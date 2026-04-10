@@ -922,7 +922,7 @@ do_remote_desktop() {
 
     command -v vncserver &>/dev/null && VNC_INSTALLED=true
     dpkg -l xfce4 &>/dev/null 2>&1 && dpkg -l xfce4 2>/dev/null | grep -q '^ii' && DESKTOP_INSTALLED=true
-    systemctl is-active --quiet vncserver@:1 2>/dev/null && VNC_RUNNING=true
+    systemctl is-active --quiet vncserver 2>/dev/null && VNC_RUNNING=true
 
     # Show current state
     if [ "$VNC_RUNNING" = true ]; then
@@ -975,7 +975,7 @@ do_remote_desktop() {
 
         *"Start"*)
             echo ""
-            systemctl start vncserver@:1 2>/dev/null && {
+            systemctl start vncserver 2>/dev/null && {
                 echo -e "  $(gum style --foreground 76 '✓ VNC started')"
             } || {
                 vncserver :1 -geometry 1280x720 -depth 24 2>/dev/null && {
@@ -991,7 +991,7 @@ do_remote_desktop() {
 
         *"Stop"*)
             echo ""
-            systemctl stop vncserver@:1 2>/dev/null
+            systemctl stop vncserver 2>/dev/null
             vncserver -kill :1 2>/dev/null || true
             echo -e "  $(gum style --foreground 76 '✓ VNC stopped')"
             echo ""
@@ -1007,8 +1007,8 @@ do_remote_desktop() {
             gum confirm --default=false "  Uninstall remote desktop? (removes VNC + XFCE)" || return
             echo ""
             echo -e "  ${YELLOW}Stopping VNC...${NC}"
-            systemctl stop vncserver@:1 2>/dev/null || true
-            systemctl disable vncserver@:1 2>/dev/null || true
+            systemctl stop vncserver 2>/dev/null || true
+            systemctl disable vncserver 2>/dev/null || true
             rm -f /etc/systemd/system/vncserver@.service
             systemctl daemon-reload
             vncserver -kill :1 2>/dev/null || true
@@ -1115,36 +1115,15 @@ VNCCONFIG
     STEP=$((STEP + 1))
     echo -e "${YELLOW}[$STEP/$TOTAL] Setting up systemd service...${NC}"
 
-    cat > /etc/systemd/system/vncserver@.service << 'SERVICE'
+    cat > /etc/systemd/system/vncserver.service << 'VNCSERVICE'
 [Unit]
-Description=TigerVNC server for display %i
-After=network.target
-
-[Service]
-Type=forking
-User=%i
-Group=%i
-ExecStartPre=/usr/bin/vncserver -kill %i > /dev/null 2>&1 || true
-ExecStart=/usr/bin/vncserver %i -geometry 1280x720 -depth 24 -localhost yes
-ExecStop=/usr/bin/vncserver -kill %i
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-
-    # If running as root, also create the user-specific service
-    if [ "$VNC_USER" = "root" ]; then
-        cat > /etc/systemd/system/vncserver@:1.service << 'ROOTSERVICE'
-[Unit]
-Description=TigerVNC server for display :1
+Description=TigerVNC server (display :1)
 After=network.target
 
 [Service]
 Type=forking
 User=root
-ExecStartPre=/usr/bin/vncserver -kill :1 > /dev/null 2>&1 || true
+ExecStartPre=-/usr/bin/vncserver -kill :1
 ExecStart=/usr/bin/vncserver :1 -geometry 1280x720 -depth 24 -localhost yes
 ExecStop=/usr/bin/vncserver -kill :1
 Restart=on-failure
@@ -1152,16 +1131,11 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-ROOTSERVICE
+VNCSERVICE
 
-        systemctl daemon-reload
-        systemctl enable vncserver@:1
-        systemctl start vncserver@:1
-    else
-        systemctl daemon-reload
-        systemctl enable vncserver@"${VNC_USER}"
-        systemctl start vncserver@"${VNC_USER}"
-    fi
+    systemctl daemon-reload
+    systemctl enable vncserver
+    systemctl start vncserver
 
     echo -e "  $(gum style --foreground 76 '✓ Service installed and started')"
     echo ""
