@@ -1076,6 +1076,10 @@ _install_remote_desktop() {
     STEP=$((STEP + 1))
     echo -e "${YELLOW}[$STEP/$TOTAL] Installing TigerVNC...${NC}"
     apt-get install -y -qq tigervnc-standalone-server tigervnc-common
+    # Verify binary exists (package may report installed but binary missing)
+    if ! command -v vncserver &>/dev/null; then
+        apt-get install --reinstall -y -qq tigervnc-standalone-server
+    fi
     echo -e "  $(gum style --foreground 76 '✓ TigerVNC installed')"
     echo ""
 
