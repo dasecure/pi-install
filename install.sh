@@ -127,6 +127,7 @@ cat > /etc/pi-zero-trust/.env << EOF
 IOTPUSH_API_KEY=${IOTPUSH_KEY}
 IOTPUSH_TOPIC=${IOTPUSH_TOPIC}
 PI_API_TOKEN=${API_TOKEN}
+PI_HOSTNAME=${HOSTNAME}
 TAILSCALE_ONLY=false
 EOF
 else
@@ -135,6 +136,7 @@ IOTPUSH_API_KEY=${IOTPUSH_KEY}
 IOTPUSH_TOPIC=${IOTPUSH_TOPIC}
 TAILSCALE_AUTH_KEY=${TAILSCALE_KEY}
 PI_API_TOKEN=${API_TOKEN}
+PI_HOSTNAME=${HOSTNAME}
 TAILSCALE_ONLY=true
 EOF
 fi
@@ -374,9 +376,20 @@ def save_pages_manifest(pages: list[dict]) -> bool:
         return False
 
 def _get_device_info() -> tuple[str, str]:
-    hostname = os.uname().nodename
-    ts_ip = get_tailscale_ip() or "N/A"
-    return hostname, ts_ip
+    hostname = os.getenv("PI_HOSTNAME", "") or os.uname().nodename
+    ts_ip = get_tailscale_ip()
+    if ts_ip:
+        return hostname, ts_ip
+    # No Tailscale — get the primary network IP
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return hostname, ip
+    except Exception:
+        return hostname, "unknown"
 
 def _build_device_actions(hostname: str, ts_ip: str) -> list[dict]:
     actions = []
