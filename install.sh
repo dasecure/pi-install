@@ -381,7 +381,7 @@ def _get_device_info() -> tuple[str, str]:
 def _build_device_actions(hostname: str, ts_ip: str) -> list[dict]:
     actions = []
     if ts_ip and ts_ip != "N/A":
-        actions.append({"action": "view", "label": f"Open {hostname}", "url": f"http://{ts_ip}:8080/stats", "clear": True})
+        actions.append({"id": "open", "label": f"Open {hostname}", "type": "url", "url": f"http://{ts_ip}:8080/stats"})
     return actions
 
 async def notify_iotpush(message: str, title: str = "Pi Zero-Trust", force: bool = False, bypass_cooldown: bool = False, priority: str = "normal", tags: list[str] | None = None, actions: list[dict] | None = None, click: str | None = None) -> bool:
