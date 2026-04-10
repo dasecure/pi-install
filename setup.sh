@@ -186,7 +186,7 @@ do_install() {
         if [ -n "$IOTPUSH_KEY" ] && [ -n "$IOTPUSH_TOPIC" ]; then
             echo ""
             echo -e "  ${DIM}Verifying iotPush credentials...${NC}"
-            TEST_RESP=$(curl -sf --connect-timeout 5 \
+            TEST_RESP=$(curl -sfL --connect-timeout 5 \
                 -H "Authorization: Bearer $IOTPUSH_KEY" \
                 -H "Content-Type: application/json" \
                 -d '{"title":"Pi Setup Test","message":"iotPush credentials verified during setup"}' \
@@ -354,7 +354,7 @@ do_post_install() {
     echo ""
 
     TEST_IP="${INSTALLED_IP:-$(hostname -I | awk '{print $1}')}"
-    HEALTH_RESULT=$(curl -sf --connect-timeout 5 "http://${TEST_IP}:8080/health" 2>/dev/null) && {
+    HEALTH_RESULT=$(curl -sfL --connect-timeout 5 "http://${TEST_IP}:8080/health" 2>/dev/null) && {
         echo -e "  $(gum style --foreground 76 '✓ Agent is healthy')"
         echo -e "  $(gum style --faint "$HEALTH_RESULT")"
     } || {
@@ -371,7 +371,7 @@ do_post_install() {
             gum confirm "  Send a test push notification?" && {
                 echo ""
                 HOSTNAME_DISPLAY="${INSTALLED_HOSTNAME:-$(hostname)}"
-                TEST_RESP=$(curl -sf --connect-timeout 5 \
+                TEST_RESP=$(curl -sfL --connect-timeout 5 \
                     -H "Authorization: Bearer $IOTPUSH_KEY_VAL" \
                     -H "Content-Type: application/json" \
                     -d "{\"title\":\"🧪 Test from $HOSTNAME_DISPLAY\",\"message\":\"iotPush is working! Sent during Pi Zero-Trust setup.\",\"priority\":\"normal\"}" \
@@ -603,7 +603,7 @@ do_iotpush() {
             echo ""
             echo -e "  ${DIM}Sending test push...${NC}"
             HOSTNAME_DISPLAY=$(hostname)
-            RESP=$(curl -sf --connect-timeout 5 \
+            RESP=$(curl -sfL --connect-timeout 5 \
                 -H "Authorization: Bearer $CURRENT_KEY" \
                 -H "Content-Type: application/json" \
                 -d "{\"title\":\"🧪 Test from $HOSTNAME_DISPLAY\",\"message\":\"iotPush is working! Sent from Pi Zero-Trust setup TUI.\",\"priority\":\"normal\"}" \
@@ -632,7 +632,7 @@ do_iotpush() {
             # Validate against API
             echo ""
             echo -e "  ${DIM}Verifying credentials...${NC}"
-            RESP=$(curl -sf --connect-timeout 5 \
+            RESP=$(curl -sfL --connect-timeout 5 \
                 -H "Authorization: Bearer $NEW_KEY" \
                 -H "Content-Type: application/json" \
                 -d '{"title":"Pi Setup","message":"iotPush credentials verified!"}' \
@@ -747,7 +747,7 @@ do_status() {
     echo ""
 
     # Quick health check
-    HEALTH_RESULT=$(curl -sf --connect-timeout 3 "http://${INSTALLED_IP:-localhost}:8080/health" 2>/dev/null) && {
+    HEALTH_RESULT=$(curl -sfL --connect-timeout 3 "http://${INSTALLED_IP:-localhost}:8080/health" 2>/dev/null) && {
         echo -e "  Health:    $(gum style --foreground 76 '✓ Responding')"
         echo -e "  $(gum style --faint "$HEALTH_RESULT")"
     } || {
