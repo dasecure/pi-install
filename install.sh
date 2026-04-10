@@ -242,7 +242,7 @@ from dotenv import load_dotenv
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("pi-agent")
 
-AGENT_VERSION = "3.0.1"
+AGENT_VERSION = "3.1.0"
 INSTALL_URL = "https://raw.githubusercontent.com/dasecure/pi-install/main/install.sh"
 
 ENV_PATH = Path("/etc/pi-zero-trust/.env")
