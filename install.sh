@@ -305,6 +305,19 @@ def load_settings() -> SettingsModel:
                     data["iotpush_api_key"] = os.getenv("IOTPUSH_API_KEY", "")
                 if not data.get("iotpush_topic"):
                     data["iotpush_topic"] = os.getenv("IOTPUSH_TOPIC", "")
+                # Backfill missing fields from env and persist
+                changed = False
+                for key, env_key in [("iotpush_api_key", "IOTPUSH_API_KEY"), ("iotpush_topic", "IOTPUSH_TOPIC")]:
+                    if not data.get(key) and os.getenv(env_key, ""):
+                        data[key] = os.getenv(env_key, "")
+                        changed = True
+                if changed:
+                    try:
+                        with open(SETTINGS_PATH, 'w') as f:
+                            json.dump(data, f, indent=2)
+                        logger.info(f"Backfilled settings from env vars: {[k for k in ['iotpush_api_key','iotpush_topic'] if data.get(k)]}")
+                    except Exception as e:
+                        logger.warning(f"Could not persist backfilled settings: {e}")
                 s = SettingsModel(**data)
                 config.TAILSCALE_ONLY = s.tailscale_only
                 return s
