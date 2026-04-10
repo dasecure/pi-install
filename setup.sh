@@ -841,7 +841,7 @@ main() {
 
         # Pause before returning to menu
         echo ""
-        gum confirm "  Return to menu?" || exit 0
+        gum confirm "  Return to menu?" || return
     done
 }
 
