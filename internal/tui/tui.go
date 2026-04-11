@@ -483,18 +483,32 @@ type installStartMsg struct{}
 func (m *installModel) runInstall() {
 	m.installLog = "Installing...\n"
 	m.cfg.Agent.Version = m.version
+
+	// Auto-generate token if empty
 	if m.cfg.Agent.APIToken == "" {
 		b := make([]byte, 32)
 		rand.Read(b)
 		m.cfg.Agent.APIToken = fmt.Sprintf("%x", b)
 	}
-	// Save config
-	if err := m.cfg.Save(config.DefaultConfigPath); err != nil {
-		m.installLog += fmt.Sprintf("  ⚠ Config save: %v\n", err)
-	} else {
-		m.installLog += "  ✓ Config written\n"
+
+	log := func(msg string) {
+		m.installLog += msg + "\n"
 	}
-	m.installLog += "  ✓ Installation complete!\n"
+
+	stages := BuildStages(&m.cfg)
+	for _, stage := range stages {
+		if stage.Skip != nil && stage.Skip() {
+			continue
+		}
+		m.installLog += fmt.Sprintf("%s %s...\n", stage.Emoji, stage.Name)
+		if err := stage.Fn(log); err != nil {
+			m.installLog += fmt.Sprintf("  ❌ %s failed: %v\n", stage.Name, err)
+			m.step = stepDone
+			return
+		}
+	}
+
+	m.installLog += "\n  ✅ Installation complete!\n"
 	m.step = stepDone
 }
 
