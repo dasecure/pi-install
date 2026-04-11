@@ -102,6 +102,9 @@ func withAuth(next http.HandlerFunc) http.HandlerFunc {
 			auth := r.Header.Get("Authorization")
 			token = strings.TrimPrefix(auth, "Bearer ")
 		}
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
 
 		if cfg.Agent.APIToken == "" {
 			next(w, r)
