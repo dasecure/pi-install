@@ -251,8 +251,8 @@ type installModel struct {
 
 func newInstallModel(version string) *installModel {
 	ti := textinput.New()
-	ti.Focus()
 	ti.CharLimit = 200
+	// Don't focus until we reach an input step
 	return &installModel{
 		step:    stepMode,
 		version: version,
@@ -262,7 +262,7 @@ func newInstallModel(version string) *installModel {
 }
 
 func (m installModel) Init() tea.Cmd {
-	return textinput.Blink
+	return nil
 }
 
 func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -293,6 +293,7 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if hostname != "" {
 					m.input.Placeholder = hostname
 				}
+				m.input.Focus()
 				return m, textinput.Blink
 			}
 
@@ -321,14 +322,16 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.input.Placeholder = "tskey-auth-..."
 						m.input.Prompt = "  Tailscale Auth Key: "
 						m.input.EchoMode = textinput.EchoPassword
-						return m, textinput.Blink
+						m.input.Focus()
+		return m, textinput.Blink
 					}
 					m.step = stepAPIToken
 					m.input.SetValue("")
 					m.input.Placeholder = "(auto-generated)"
 					m.input.Prompt = "  API Token: "
 					m.input.EchoMode = textinput.EchoNormal
-					return m, textinput.Blink
+					m.input.Focus()
+		return m, textinput.Blink
 				}
 				m.cfg.IotPush.Enabled = true
 				m.step = stepIotPushKey
@@ -336,7 +339,8 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.input.Placeholder = "iotpush_xxx..."
 				m.input.Prompt = "  iotPush API Key: "
 				m.input.EchoMode = textinput.EchoPassword
-				return m, textinput.Blink
+				m.input.Focus()
+		return m, textinput.Blink
 			}
 
 		case stepIotPushValidate:
@@ -420,6 +424,7 @@ func (m *installModel) advanceStep() (tea.Model, tea.Cmd) {
 			m.input.Prompt = "  API Token: "
 			m.input.EchoMode = textinput.EchoNormal
 		}
+		m.input.Focus()
 		return m, textinput.Blink
 
 	case stepTailscaleKey:
@@ -438,7 +443,8 @@ func (m *installModel) advanceStep() (tea.Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
-	return m, textinput.Blink
+	m.input.Focus()
+		return m, textinput.Blink
 }
 
 type installStartMsg struct{}
