@@ -419,6 +419,7 @@ func (m *installModel) advanceStep() (tea.Model, tea.Cmd) {
 		m.step = stepIotPushConfirm
 		m.yesNoCursor = 0
 		m.input.Blur()
+		return m, nil  // non-input step, no blink needed
 
 	case stepIotPushKey:
 		m.cfg.IotPush.APIKey = m.input.Value()
@@ -467,12 +468,14 @@ func (m *installModel) advanceStep() (tea.Model, tea.Cmd) {
 		m.cfg.Agent.APIToken = m.input.Value()
 		m.step = stepConfirm
 		m.yesNoCursor = 0
+		m.input.Blur()
+		return m, nil  // non-input step
 
 	default:
 		return m, nil
 	}
 	m.input.Focus()
-		return m, textinput.Blink
+	return m, textinput.Blink
 }
 
 type installStartMsg struct{}
