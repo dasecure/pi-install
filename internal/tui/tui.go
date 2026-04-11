@@ -350,7 +350,7 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.input.Prompt = "  Tailscale Auth Key: "
 						m.input.EchoMode = textinput.EchoPassword
 						m.input.Focus()
-		return m, textinput.Blink
+						return m, textinput.Blink
 					}
 					m.step = stepAPIToken
 					m.input.SetValue("")
@@ -358,7 +358,7 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.input.Prompt = "  API Token: "
 					m.input.EchoMode = textinput.EchoNormal
 					m.input.Focus()
-		return m, textinput.Blink
+					return m, textinput.Blink
 				}
 				m.cfg.IotPush.Enabled = true
 				m.step = stepIotPushKey
@@ -367,7 +367,7 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.input.Prompt = "  iotPush API Key: "
 				m.input.EchoMode = textinput.EchoPassword
 				m.input.Focus()
-		return m, textinput.Blink
+				return m, textinput.Blink
 			}
 
 		case stepIotPushValidate:
@@ -418,6 +418,7 @@ func (m *installModel) advanceStep() (tea.Model, tea.Cmd) {
 		m.cfg.Agent.Hostname = val
 		m.step = stepIotPushConfirm
 		m.yesNoCursor = 0
+		m.input.Blur()
 
 	case stepIotPushKey:
 		m.cfg.IotPush.APIKey = m.input.Value()

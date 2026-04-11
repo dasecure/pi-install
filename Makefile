@@ -1,5 +1,5 @@
 APP_NAME    := pi-agent
-VERSION     := 3.1.3
+VERSION     := 3.1.4
 BUILD_DIR   := build
 LDFLAGS     := -s -w -X main.version=$(VERSION)
 
