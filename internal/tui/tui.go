@@ -276,14 +276,14 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch m.step {
 		case stepMode:
-			if msg.String() == "left" || msg.String() == "right" {
+			switch msg.String() {
+			case "up", "down", "left", "right", "tab", "j", "k":
 				if m.yesNoCursor == 0 {
 					m.yesNoCursor = 1
 				} else {
 					m.yesNoCursor = 0
 				}
-			}
-			if msg.String() == "enter" {
+			case "enter":
 				m.cfg.Tailscale.Enabled = m.yesNoCursor == 0
 				m.step = stepHostname
 				m.input.SetValue("")
@@ -480,7 +480,7 @@ func (m installModel) View() string {
 			s.WriteString(greenStyle.Bold(true).Render("VPS / Server (no Tailscale)"))
 		}
 		s.WriteString("\n\n")
-		s.WriteString(dimStyle.Render("  ← → to select, Enter to confirm"))
+		s.WriteString(dimStyle.Render("  ↑↓ or ←→ to select, Enter to confirm"))
 
 	case stepHostname:
 		s.WriteString(titleStyle.Render("  Step 2: Set hostname"))
@@ -502,7 +502,7 @@ func (m installModel) View() string {
 			s.WriteString("  [ Yes ]  [✓ No]")
 		}
 		s.WriteString("\n\n")
-		s.WriteString(dimStyle.Render("  ← → to select, Enter to confirm"))
+		s.WriteString(dimStyle.Render("  ↑↓ or ←→ to select, Enter to confirm"))
 
 	case stepIotPushKey:
 		s.WriteString(titleStyle.Render("  Step 3: iotPush API Key"))
