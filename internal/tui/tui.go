@@ -730,18 +730,38 @@ type qrModel struct {
 
 func newQRModel() *qrModel {
 	m := &qrModel{}
-	info := system.GetInfo()
-	tsIP := info.TailscaleIP
-	if tsIP == "" {
-		tsIP = info.LocalIP
-	}
-	m.qrString = fmt.Sprintf("http://%s:8080", tsIP)
 
-	png, err := qrcode.Encode(m.qrString, qrcode.Medium, 256)
+	// Load config to get token
+	var hostname, ip, token, dtype string
+
+	cfg, err := config.Load(config.DefaultConfigPath)
+	if err != nil {
+		m.qrString = "Agent not installed — no QR to show"
+		return m
+	}
+
+	hostname = cfg.Agent.Hostname
+	token = cfg.Agent.APIToken
+	if cfg.Tailscale.Enabled {
+		dtype = "pi"
+	} else {
+		dtype = "vps"
+	}
+
+	info := system.GetInfo()
+	ip = info.TailscaleIP
+	if ip == "" {
+		ip = info.LocalIP
+	}
+
+	// Match the format the PiControl iOS app expects
+	m.qrString = fmt.Sprintf(`{"h":"%s","a":"%s","p":8080,"t":"%s","d":"%s"}`, hostname, ip, token, dtype)
+
+	qr, err := qrcode.New(m.qrString, qrcode.Medium)
 	if err != nil {
 		m.qrString = fmt.Sprintf("Error generating QR: %v", err)
 	} else {
-		m.png = png
+		m.png = []byte(qr.ToSmallString(false))
 	}
 	return m
 }
@@ -756,20 +776,18 @@ func (m qrModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m qrModel) View() string {
 	var s strings.Builder
-	s.WriteString(titleStyle.Render("  📱 QR Code — Mobile Pairing"))
+	s.WriteString(titleStyle.Render("  📱 QR Code — PiControl Pairing"))
 	s.WriteString("\n\n")
 
 	// Render QR as ASCII art
-	if m.png != nil {
-		qr, err := qrcode.New(m.qrString, qrcode.Medium)
-		if err == nil {
-			s.WriteString(qr.ToSmallString(false))
-		}
+	qr, err := qrcode.New(m.qrString, qrcode.Medium)
+	if err == nil {
+		s.WriteString(qr.ToSmallString(false))
 	}
 
 	s.WriteString("\n")
-	s.WriteString(fmt.Sprintf("  URL: %s\n", greenStyle.Render(m.qrString)))
+	s.WriteString(fmt.Sprintf("  %s\n", greenStyle.Render("📱 Scan in PiControl app → Settings → Scan QR")))
 	s.WriteString("\n")
-	s.WriteString(dimStyle.Render("  Scan with your phone • Esc → back"))
+	s.WriteString(dimStyle.Render("  Esc → back"))
 	return s.String()
 }
