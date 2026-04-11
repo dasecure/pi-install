@@ -78,11 +78,43 @@ type Model struct {
 
 // Run launches the interactive TUI.
 func Run(version string) {
-	items := []list.Item{
-		menuItem{title: "🚀 Install Agent", desc: "Interactive setup wizard"},
-		menuItem{title: "📊 System Status", desc: "Live system health dashboard"},
-		menuItem{title: "📱 QR Code", desc: "Display pairing QR code"},
-		menuItem{title: "❌ Exit", desc: "Quit the application"},
+	m := Model{
+		state:   stateMenu,
+		version: version,
+	}
+	m.buildMenu()
+
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+// agentInstalled checks if the agent config exists.
+func agentInstalled() bool {
+	_, err := os.Stat(config.DefaultConfigPath)
+	return err == nil
+}
+
+// buildMenu creates the menu based on current state.
+func (m *Model) buildMenu() {
+	var items []list.Item
+
+	if agentInstalled() {
+		items = []list.Item{
+			menuItem{title: "📊  Status", desc: "Live system health dashboard"},
+			menuItem{title: "📱  Show QR Code", desc: "Scan to pair with PiControl app"},
+			menuItem{title: "🔄  Update Agent", desc: "Check and apply updates"},
+			menuItem{title: "🗑   Uninstall", desc: "Remove agent from this device"},
+			menuItem{title: "❌  Exit", desc: "Quit"},
+		}
+	} else {
+		items = []list.Item{
+			menuItem{title: "🚀  Install Agent", desc: "Interactive setup wizard"},
+			menuItem{title: "📊  System Status", desc: "Live system health dashboard"},
+			menuItem{title: "❌  Exit", desc: "Quit"},
+		}
 	}
 
 	l := list.New(items, list.NewDefaultDelegate(), 60, 15)
@@ -90,18 +122,7 @@ func Run(version string) {
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.Styles.Title = lipgloss.NewStyle()
-
-	m := Model{
-		state:   stateMenu,
-		version: version,
-		menu:    l,
-	}
-
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+	m.menu = l
 }
 
 func (m Model) Init() tea.Cmd {
@@ -152,21 +173,27 @@ func (m Model) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch i.title {
-		case "🚀 Install Agent":
+		case "🚀  Install Agent":
 			m.install = newInstallModel(m.version)
 			m.state = stateInstall
-			return m, textinput.Blink // start cursor blinking
-		case "📊 System Status":
+			return m, textinput.Blink
+		case "📊  Status", "📊 System Status":
 			m.status = newStatusModel()
 			m.state = stateStatus
 			return m, tea.Tick(0, func(t time.Time) tea.Msg {
 				return statusRefreshMsg{}
 			})
-		case "📱 QR Code":
+		case "📱  Show QR Code":
 			m.qr = newQRModel()
 			m.state = stateQR
 			return m, nil
-		case "❌ Exit":
+		case "🔄  Update Agent":
+			// TODO: trigger update via agent API
+			return m, nil
+		case "🗑   Uninstall":
+			// TODO: trigger uninstall
+			return m, nil
+		case "❌  Exit", "❌ Exit":
 			m.quitting = true
 			return m, tea.Quit
 		}
