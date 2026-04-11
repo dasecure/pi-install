@@ -203,8 +203,8 @@ func (m Model) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateInstall(msg tea.Msg) (tea.Model, tea.Cmd) {
 	im, cmd := m.install.Update(msg)
-	if newIm, ok := im.(installModel); ok {
-		m.install = &newIm
+	if newIm, ok := im.(*installModel); ok {
+		m.install = newIm
 	}
 	if m.install.done {
 		m.state = stateMenu
@@ -215,8 +215,8 @@ func (m Model) updateInstall(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateStatus(msg tea.Msg) (tea.Model, tea.Cmd) {
 	sm, cmd := m.status.Update(msg)
-	if newSm, ok := sm.(statusModel); ok {
-		m.status = &newSm
+	if newSm, ok := sm.(*statusModel); ok {
+		m.status = newSm
 	}
 	return m, cmd
 }
@@ -288,11 +288,11 @@ func newInstallModel(version string) *installModel {
 	}
 }
 
-func (m installModel) Init() tea.Cmd {
+func (m *installModel) Init() tea.Cmd {
 	return nil
 }
 
-func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -498,7 +498,7 @@ func (m *installModel) runInstall() {
 	m.step = stepDone
 }
 
-func (m installModel) View() string {
+func (m *installModel) View() string {
 	var s strings.Builder
 
 	switch m.step {
@@ -646,11 +646,11 @@ func newStatusModel() *statusModel {
 	}
 }
 
-func (m statusModel) Init() tea.Cmd {
+func (m *statusModel) Init() tea.Cmd {
 	return nil
 }
 
-func (m statusModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *statusModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(statusRefreshMsg); ok {
 		m.stats = system.GetStats()
 		m.info = system.GetInfo()
@@ -661,7 +661,7 @@ func (m statusModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m statusModel) View() string {
+func (m *statusModel) View() string {
 	var s strings.Builder
 	s.WriteString(titleStyle.Render("  📊 System Status"))
 	s.WriteString("\n\n")
