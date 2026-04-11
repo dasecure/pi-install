@@ -61,6 +61,7 @@ const (
 	stateInstall
 	stateStatus
 	stateQR
+	stateUpdate
 )
 
 // Model is the top-level Bubble Tea model.
@@ -73,6 +74,7 @@ type Model struct {
 	install  *installModel
 	status   *statusModel
 	qr       *qrModel
+	upd      *updateModel
 	quitting bool
 }
 
@@ -159,6 +161,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateStatus(msg)
 	case stateQR:
 		return m.updateQR(msg)
+	case stateUpdate:
+		return m.updateUpdate(msg)
 	}
 	return m, nil
 }
@@ -188,8 +192,9 @@ func (m Model) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = stateQR
 			return m, nil
 		case "🔄  Update Agent":
-			// TODO: trigger update via agent API
-			return m, nil
+			m.upd = newUpdateModel()
+			m.state = stateUpdate
+			return m, m.upd.Init()
 		case "🗑   Uninstall":
 			// TODO: trigger uninstall
 			return m, nil
@@ -225,6 +230,20 @@ func (m Model) updateQR(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) updateUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
+	um, cmd := m.upd.Update(msg)
+	if newUm, ok := um.(*updateModel); ok {
+		m.upd = newUm
+	}
+	// Esc returns to menu
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.String() == "esc" {
+		m.state = stateMenu
+		m.buildMenu()
+		return m, nil
+	}
+	return m, cmd
+}
+
 func (m Model) View() string {
 	if m.quitting {
 		return dimStyle.Render("Goodbye! 👋") + "\n"
@@ -243,6 +262,8 @@ func (m Model) View() string {
 		s.WriteString(m.status.View())
 	case stateQR:
 		s.WriteString(m.qr.View())
+	case stateUpdate:
+		s.WriteString(m.upd.View())
 	}
 	return s.String()
 }
