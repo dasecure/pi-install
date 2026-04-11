@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -62,6 +63,7 @@ const (
 	stateStatus
 	stateQR
 	stateUpdate
+	stateUninstall
 )
 
 // Model is the top-level Bubble Tea model.
@@ -75,6 +77,10 @@ type Model struct {
 	status   *statusModel
 	qr       *qrModel
 	upd      *updateModel
+	uninstallConfirm bool
+	uninstallDone   bool
+	uninstallCursor int
+	uninstallLog    string
 	quitting bool
 }
 
@@ -163,6 +169,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateQR(msg)
 	case stateUpdate:
 		return m.updateUpdate(msg)
+	case stateUninstall:
+		return m.updateUninstall(msg)
 	}
 	return m, nil
 }
@@ -196,7 +204,9 @@ func (m Model) updateMenu(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.state = stateUpdate
 			return m, m.upd.Init()
 		case "🗑   Uninstall":
-			// TODO: trigger uninstall
+			m.uninstallConfirm = true
+			m.uninstallCursor = 0
+			m.state = stateUninstall
 			return m, nil
 		case "❌  Exit", "❌ Exit":
 			m.quitting = true
@@ -244,6 +254,117 @@ func (m Model) updateUpdate(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m Model) updateUninstall(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
+		case "esc":
+			m.state = stateMenu
+			m.buildMenu()
+			return m, nil
+		case "up", "down", "left", "right", "tab":
+			if !m.uninstallDone {
+				if m.uninstallCursor == 0 {
+					m.uninstallCursor = 1
+				} else {
+					m.uninstallCursor = 0
+				}
+			}
+		case "enter":
+			if !m.uninstallConfirm {
+				// shouldn't happen but safety
+				m.state = stateMenu
+				m.buildMenu()
+				return m, nil
+			}
+			if m.uninstallDone {
+				m.state = stateMenu
+				m.buildMenu()
+				return m, nil
+			}
+			if m.uninstallCursor == 0 {
+				// Confirmed — run uninstall
+				m.runUninstall()
+			}
+		}
+	}
+	return m, nil
+}
+
+func (m *Model) runUninstall() {
+	var log strings.Builder
+	log.WriteString("Uninstalling...\n")
+
+	cmds := []struct {
+		desc string
+		cmd  []string
+	}{
+		{"Stop service", []string{"systemctl", "stop", "pi-monitor"}},
+		{"Disable service", []string{"systemctl", "disable", "pi-monitor"}},
+	}
+
+	for _, c := range cmds {
+		if err := exec.Command(c.cmd[0], c.cmd[1:]...).Run(); err != nil {
+			log.WriteString(fmt.Sprintf("  ⚠ %s: %v\n", c.desc, err))
+		} else {
+			log.WriteString(fmt.Sprintf("  ✓ %s\n", c.desc))
+		}
+	}
+
+	// Remove files
+	removeItems := []struct {
+		desc string
+		path string
+	}{
+		{"Service file", "/etc/systemd/system/pi-monitor.service"},
+		{"Agent binary", "/opt/pi-utility/pi-service/pi-agent"},
+		{"Config dir", config.DefaultConfigPath},
+		{"Notify script", "/usr/local/bin/pi-notify"},
+	}
+
+	for _, item := range removeItems {
+		if _, err := os.Stat(item.path); err == nil {
+			if err := os.RemoveAll(item.path); err != nil {
+				log.WriteString(fmt.Sprintf("  ⚠ Remove %s: %v\n", item.desc, err))
+			} else {
+				log.WriteString(fmt.Sprintf("  ✓ Removed %s\n", item.desc))
+			}
+		}
+	}
+
+	// Reload systemd
+	_ = exec.Command("systemctl", "daemon-reload").Run()
+	log.WriteString("  ✓ systemd reloaded\n")
+
+	log.WriteString("\n  ✅ Uninstall complete!\n")
+	m.uninstallLog = log.String()
+	m.uninstallDone = true
+}
+
+func (m Model) viewUninstall() string {
+	var s strings.Builder
+	s.WriteString(titleStyle.Render("  🗑  Uninstall Agent"))
+	s.WriteString("\n\n")
+
+	if m.uninstallDone {
+		s.WriteString(m.uninstallLog)
+		s.WriteString("\n")
+		s.WriteString(dimStyle.Render("  Press Esc or Enter to return to menu"))
+		return s.String()
+	}
+
+	s.WriteString(redStyle.Render("  ⚠ This will remove the agent and all its data."))
+	s.WriteString("\n\n")
+
+	if m.uninstallCursor == 0 {
+		s.WriteString("  [✓ Uninstall]  [ Cancel ]")
+	} else {
+		s.WriteString("  [ Uninstall ]  [✓ Cancel]")
+	}
+	s.WriteString("\n\n")
+	s.WriteString(dimStyle.Render("  ↑↓ to select • Enter to confirm • Esc to cancel"))
+	return s.String()
+}
+
 func (m Model) View() string {
 	if m.quitting {
 		return dimStyle.Render("Goodbye! 👋") + "\n"
@@ -264,6 +385,8 @@ func (m Model) View() string {
 		s.WriteString(m.qr.View())
 	case stateUpdate:
 		s.WriteString(m.upd.View())
+	case stateUninstall:
+		s.WriteString(m.viewUninstall())
 	}
 	return s.String()
 }
