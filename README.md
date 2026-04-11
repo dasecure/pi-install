@@ -1,137 +1,94 @@
-# Pi Zero-Trust Agent Installer
+# Pi Zero-Trust Agent
 
-Self-contained install script for the [Pi Zero-Trust](https://github.com/dasecure/pi-zero-trust) agent. Sets up the monitoring agent on any Linux machine — no git clone needed, all files are embedded in the script.
+A modern, cross-platform monitoring agent with an interactive TUI installer.
 
-## Quick Start (Interactive TUI)
-
-The easiest way to get started. A guided terminal UI walks you through everything — no CLI flags needed:
+## Quick Install (one-liner)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dasecure/pi-install/main/setup.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/dasecure/pi-install/main/start.sh | sudo bash
 ```
 
-The TUI will guide you through:
+This will:
+1. Install Go (if not present)
+2. Download the source
+3. Build `pi-agent` and launch the interactive TUI
 
-1. **Device type** — Raspberry Pi (with Tailscale) or VPS (no Tailscale)
-2. **Hostname** — set your device name
-3. **iotPush** — enter your API key and topic for push notifications (validated live against the API)
-4. **Tailscale** — enter your auth key (Pi mode only)
-5. **API token** — custom or auto-generated
-6. **Confirmation** — review all settings before installing
+## Pre-built Binaries
 
-After install, you get:
-- 🩺 Health check against the agent
-- 📱 QR code for PiControl app
-- 🔔 Optional test push notification
-- ✅ Service status verification
+Download from [Releases](https://github.com/dasecure/pi-install/releases):
 
-### TUI Menu Options
+| Platform | Arch | Binary |
+|----------|------|--------|
+| Linux | arm64 | `pi-agent` (for Raspberry Pi) |
+| Linux | amd64 | `pi-agent` (for VPS) |
+| macOS | arm64 | `pi-agent` |
+| macOS | amd64 | `pi-agent` |
+| Windows | amd64 | `pi-agent.exe` |
 
-Once installed, the TUI provides a full management menu:
-
-| Option | Description |
-|--------|-------------|
-| 📊 **Status** | Service health, IP, API endpoint, live logs |
-| 🔔 **iotPush** | Configure, test, update, or disable push notifications |
-| 🔄 **Update Agent** | One-click update with live logs |
-| 🗑 **Uninstall Agent** | Double-confirmed removal |
-| 🚀 **Install Agent** | Shown when agent is not yet installed |
-
-### iotPush Management
-
-The dedicated iotPush menu lets you:
-
-- **Test Push** — send a notification to verify credentials are working
-- **Update Credentials** — change your API key or topic (validated against the API)
-- **Disable** — remove credentials and turn off notifications
-- **Set Up** — configure iotPush for the first time
-
-Push notifications are sent via `POST /api/push/{topic}` on [iotpush.com](https://iotpush.com). Get your key at [iotpush.com/settings](https://iotpush.com/settings).
-
----
-
-## CLI Install (Advanced)
-
-If you prefer the command line or need to automate installs:
-
-### Install on Pi (with Tailscale)
+## Usage
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dasecure/pi-install/main/install.sh | sudo bash -s -- \
-  --iotpush-key YOUR_KEY \
-  --iotpush-topic YOUR_TOPIC \
-  --tailscale-key tskey-auth-XXXXX \
-  --hostname my-pi
+pi-agent              # Interactive TUI setup
+pi-agent serve        # Start monitoring agent (HTTP API on :8080)
+pi-agent install      # Headless install (for scripting)
+pi-agent version      # Print version
 ```
 
-### Install on VPS (without Tailscale)
+### Headless Install (VPS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dasecure/pi-install/main/install.sh | sudo bash -s -- \
-  --no-tailscale \
-  --hostname my-vps
-```
-
-An API token is auto-generated and printed at the end. You can also provide your own:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/dasecure/pi-install/main/install.sh | sudo bash -s -- \
+pi-agent install \
   --no-tailscale \
   --hostname my-vps \
-  --api-token YOUR_TOKEN
+  --iotpush-key YOUR_KEY \
+  --iotpush-topic YOUR_TOPIC
 ```
 
-After install, a QR code is displayed in the terminal. Scan it in the PiControl iOS app (Settings > Scan QR) to add the device instantly.
+### Headless Install (Pi with Tailscale)
 
-## Update Agent
-
-**Interactive:** Run the TUI and choose "Update Agent":
 ```bash
-sudo bash /opt/pi-utility/setup.sh  # or curl the setup.sh again
+pi-agent install \
+  --tailscale-key tskey-auth-xxx \
+  --hostname my-pi \
+  --iotpush-key YOUR_KEY \
+  --iotpush-topic YOUR_TOPIC
 ```
 
-**CLI:**
+## API Endpoints
+
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `GET /health` | No | Health check |
+| `GET /stats` | Yes | System stats (CPU, RAM, disk, temp) |
+| `GET /system` | Yes | Platform info, Tailscale, Pi model |
+| `GET /logs/{type}` | Yes | System logs (journalctl) |
+| `GET /settings` | Yes | Current config |
+| `PUT /settings` | Yes | Update config |
+| `POST /notify` | Yes | Send push notification |
+| `POST /reboot` | Yes | Reboot device |
+| `POST /shutdown` | Yes | Shutdown device |
+
+Auth: `X-API-Token` header or `Authorization: Bearer <token>`. Tailscale IPs (100.x.x.x) are auto-trusted.
+
+## Build from Source
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dasecure/pi-install/main/install.sh | sudo bash -s -- --update
-sudo systemctl restart pi-monitor
+go build -ldflags "-s -w" -o pi-agent .
+make all    # cross-compile all platforms
 ```
 
-**PiControl app:** Tap **Update Agent** on the Dashboard.
+## Architecture
 
-## Uninstall Agent
-
-**Interactive:** Run the TUI and choose "Uninstall Agent":
-```bash
-sudo bash /opt/pi-utility/setup.sh  # or curl the setup.sh again
+```
+pi-agent (single binary)
+├── TUI mode (default)       — Bubble Tea interactive setup wizard
+├── serve                    — HTTP monitoring agent (replaces Python)
+├── install                  — Headless multi-stage pipeline
+└── config: /etc/pi-zero-trust/config.yaml
 ```
 
-**CLI:**
-```bash
-sudo bash /opt/pi-utility/uninstall.sh
-```
+## Requirements
 
-**PiControl app:** Tap **Uninstall Agent** on the Dashboard.
-
-This removes the agent service, files, and config. Tailscale is left installed.
-
-## CLI Options
-
-| Flag | Description |
-|------|-------------|
-| `--hostname NAME` | Set the device hostname |
-| `--tailscale-key KEY` | Tailscale auth key for automatic join |
-| `--iotpush-key KEY` | iotPush API key for push notifications |
-| `--iotpush-topic TOPIC` | iotPush topic for notifications |
-| `--no-tailscale` | Skip Tailscale setup (for VPS installs) |
-| `--api-token TOKEN` | Set a custom API token (auto-generated if omitted) |
-| `--watchdog` | Enable hardware watchdog (Pi only) |
-| `--update` | Update agent files only (skip config/Tailscale) |
-
-## Get Your Keys
-
-- **iotPush**: [iotpush.com/settings](https://iotpush.com/settings)
-- **Tailscale**: [login.tailscale.com/admin/settings/keys](https://login.tailscale.com/admin/settings/keys)
-
-## License
-
-MIT - DaSecure Solutions LLC
+- Linux (Debian/Ubuntu recommended), macOS, or Windows
+- For Tailscale features: [Tailscale](https://tailscale.com) installed
+- For iotPush notifications: [iotPush](https://iotpush.com) account

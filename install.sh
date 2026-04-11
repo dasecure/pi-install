@@ -5,7 +5,8 @@
 # Pi:  curl -fsSL https://install.dasecure.com | sudo bash -s -- --iotpush-key KEY --iotpush-topic TOPIC --tailscale-key TSKEY
 # VPS: curl -fsSL https://install.dasecure.com | sudo bash -s -- --no-tailscale --hostname my-vps
 
-set -e
+set -uo pipefail
+trap 'echo "${RED}Error at line $LINENO: $BASH_COMMAND${NC}" >&2' ERR
 
 # Colors
 RED='\033[0;31m'
@@ -190,7 +191,11 @@ if [ "$NO_TAILSCALE" = false ]; then
 
   STEP=$((STEP + 1))
   echo -e "${YELLOW}[$STEP/$TOTAL_STEPS] Connecting Tailscale...${NC}"
-  tailscale up --authkey="$TAILSCALE_KEY" --ssh --hostname="$HOSTNAME" || true
+  if tailscale status &>/dev/null; then
+    echo -e "  ${BLUE}→${NC} Tailscale already connected"
+  else
+    tailscale up --authkey="$TAILSCALE_KEY" --ssh --hostname="$HOSTNAME" || true
+  fi
   TS_IP=$(tailscale ip -4 2>/dev/null || echo "pending")
   echo -e "  ${GREEN}✓${NC} Tailscale IP: $TS_IP"
 
@@ -919,7 +924,6 @@ Group=root
 WorkingDirectory=/opt/pi-utility/pi-service
 Environment="PATH=/opt/pi-utility/venv/bin:/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=-/etc/pi-zero-trust/.env
-ExecStartPre=/opt/pi-utility/venv/bin/pip install -q -r /opt/pi-utility/pi-service/requirements.txt
 ExecStart=/opt/pi-utility/venv/bin/uvicorn pi-monitor:app --host 0.0.0.0 --port 8080 --log-level info
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure

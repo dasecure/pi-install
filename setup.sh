@@ -4,7 +4,8 @@
 # Usage: curl -fsSL https://raw.githubusercontent.com/dasecure/pi-install/main/setup.sh | sudo bash
 #   or:  sudo bash setup.sh
 
-set -e
+set -uo pipefail
+trap 'echo "${RED}Error at line $LINENO: $BASH_COMMAND${NC}" >&2' ERR
 
 # ──────────────────────────────────────────────
 # Colors & Constants
@@ -20,6 +21,9 @@ NC='\033[0m'
 
 GUM_VERSION="0.14.3"
 INSTALL_SCRIPT_URL="https://raw.githubusercontent.com/dasecure/pi-install/main/install.sh"
+LOG_FILE="/var/log/pi-setup.log"
+
+log() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG_FILE" 2>/dev/null || true; }
 
 # ──────────────────────────────────────────────
 # Dependency check / install
@@ -389,24 +393,7 @@ do_post_install() {
     fi
 
     # Show QR code
-    if command -v /opt/pi-utility/venv/bin/python3 &>/dev/null; then
-        QR_DATA="{\"h\":\"${INSTALLED_HOSTNAME:-$HOSTNAME_VAL}\",\"a\":\"${INSTALLED_IP}\",\"p\":8080,\"t\":\"${INSTALLED_TOKEN}\",\"d\":\"$( [ "$TAILSCALE_ONLY" = "true" ] && echo 'pi' || echo 'vps')\"}"
-        /opt/pi-utility/venv/bin/python3 -c "
-import sys
-try:
-    import qrcode
-    qr = qrcode.QRCode(border=1)
-    qr.add_data(sys.argv[1])
-    qr.make(fit=True)
-    qr.print_ascii(invert=True)
-except ImportError:
-    pass
-" "$QR_DATA" 2>/dev/null && {
-            echo ""
-            echo -e "  $(gum style --foreground 36 '📱 Scan this QR in PiControl app → Settings → Scan QR')"
-            echo ""
-        } || true
-    fi
+    _show_qr "${INSTALLED_HOSTNAME:-$HOSTNAME_VAL}" "${INSTALLED_IP}" "${INSTALLED_TOKEN}" "$( [ "$TAILSCALE_ONLY" = "true" ] && echo 'pi' || echo 'vps')"
 
     # Service status
     gum style --bold "  Service Status"
@@ -438,45 +425,89 @@ do_update() {
     gum style --bold --foreground 36 "  🔄 Update Agent"
     echo ""
 
-    # Check current version
-    if systemctl is-active --quiet pi-monitor 2>/dev/null; then
-        CURRENT_VER=$(/opt/pi-utility/venv/bin/python3 -c "
-import sys; sys.path.insert(0,'/opt/pi-utility/pi-service')
-try:
-    exec(open('/opt/pi-utility/pi-service/pi-monitor.py').read().split('AGENT_VERSION')[1].split('=')[1].split('\n')[0].strip().strip('\"').strip(\"'\"))
-except: pass
-" 2>/dev/null || echo "unknown")
-        echo -e "  Current version: $(gum style --foreground 76 "$CURRENT_VER")"
+    # Get agent address
+    if command -v tailscale &>/dev/null; then
+        AGENT_IP=$(tailscale ip -4 2>/dev/null || hostname -I | awk '{print $1}')
     else
-        echo -e "  $(gum style --foreground 214 '⚠ Agent service is not running')"
+        AGENT_IP=$(hostname -I | awk '{print $1}')
+    fi
+    AGENT_URL="http://$AGENT_IP:8080"
+
+    # Check current version via agent API
+    HEALTH=$(curl -sfL --connect-timeout 5 "$AGENT_URL/health" 2>/dev/null)
+    if [ -n "$HEALTH" ]; then
+        CURRENT_VER=$(echo "$HEALTH" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+        echo -e "  Current version: $(gum style --foreground 76 "${CURRENT_VER:-unknown}")"
+    else
+        echo -e "  $(gum style --foreground 214 "⚠ Agent not responding at $AGENT_IP")"
+        echo -e "  $(gum style --faint 'Make sure pi-monitor is running')"
+        echo ""
+        return
     fi
     echo ""
 
-    gum confirm "  Download and apply update?" || {
+    # Check for update via agent API
+    API_TOKEN=$(grep '^PI_API_TOKEN=' /etc/pi-zero-trust/.env 2>/dev/null | cut -d= -f2)
+    echo -e "  ${DIM}Checking for updates...${NC}"
+    CHECK=$(curl -sfL --connect-timeout 10 \
+        -H "X-API-Token: $API_TOKEN" \
+        "$AGENT_URL/check-update" 2>/dev/null)
+
+    if [ -n "$CHECK" ]; then
+        UPDATE_AVAIL=$(echo "$CHECK" | grep -o '"update_available":[^,}]*' | cut -d: -f2)
+        LATEST_VER=$(echo "$CHECK" | grep -o '"latest_version":"[^"]*"' | cut -d'"' -f4)
+        MSG=$(echo "$CHECK" | grep -o '"latest_message":"[^"]*"' | cut -d'"' -f4)
+
+        if [ "$UPDATE_AVAIL" = "true" ]; then
+            echo -e "  $(gum style --foreground 214 "Update available: $LATEST_VER")"
+            [ -n "$MSG" ] && echo -e "  $(gum style --faint "$MSG")"
+        else
+            echo -e "  $(gum style --foreground 76 '✓ Already up to date')"
+            echo ""
+            gum confirm "  Force update anyway?" || return
+        fi
+    else
+        echo -e "  $(gum style --foreground 214 '⚠ Could not check for updates')"
+    fi
+    echo ""
+
+    gum confirm "  Apply update?" || {
         echo -e "${YELLOW}Cancelled.${NC}"
         return
     }
     echo ""
 
-    echo -e "${GREEN}Updating agent files...${NC}"
-    echo ""
+    # Trigger update via agent API — agent handles download, install, restart
+    echo -e "${GREEN}Updating via agent...${NC}"
+    RESULT=$(curl -sfL --connect-timeout 10 --max-time 180 \
+        -X POST \
+        -H "X-API-Token: $API_TOKEN" \
+        "$AGENT_URL/update" 2>/dev/null)
 
-    # Prefer local, fall back to curl
-    if [ -f "$(dirname "$0")/install.sh" ]; then
-        bash "$(dirname "$0")/install.sh" --update
+    if [ -n "$RESULT" ]; then
+        SUCCESS=$(echo "$RESULT" | grep -o '"success":[^,}]*' | cut -d: -f2)
+        MSG=$(echo "$RESULT" | grep -o '"message":"[^"]*"' | cut -d'"' -f4)
+        if [ "$SUCCESS" = "true" ]; then
+            echo -e "  $(gum style --foreground 76 '✓ Update applied')"
+            [ -n "$MSG" ] && echo -e "  $(gum style --faint "$MSG")"
+            echo ""
+            echo -e "  $(gum style --faint 'Agent is restarting...')"
+            sleep 5
+            # Verify it came back
+            NEW_HEALTH=$(curl -sfL --connect-timeout 15 "$AGENT_URL/health" 2>/dev/null)
+            if [ -n "$NEW_HEALTH" ]; then
+                NEW_VER=$(echo "$NEW_HEALTH" | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+                echo -e "  $(gum style --foreground 76 "✓ Agent running — version ${NEW_VER:-unknown}")"
+            else
+                echo -e "  $(gum style --foreground 214 '⚠ Agent still restarting — give it a moment')"
+            fi
+        else
+            echo -e "  $(gum style --foreground 214 '✗ Update failed')"
+            [ -n "$MSG" ] && echo -e "  $(gum style --faint "$MSG")"
+        fi
     else
-        curl -fsSL "$INSTALL_SCRIPT_URL" | bash -s -- --update
-    fi
-
-    echo ""
-    echo -e "${GREEN}Restarting agent...${NC}"
-    systemctl restart pi-monitor
-    sleep 2
-
-    if systemctl is-active --quiet pi-monitor; then
-        echo -e "  $(gum style --foreground 76 '✓ Agent updated and running')"
-    else
-        echo -e "  $(gum style --foreground 214 '⚠ Agent may need a moment — check: journalctl -u pi-monitor -n 20')"
+        echo -e "  $(gum style --foreground 214 '✗ Could not reach agent for update')"
+        echo -e "  $(gum style --faint 'Check: journalctl -u pi-monitor -n 20')"
     fi
     echo ""
     echo -e "  $(gum style --faint 'Returning to menu...')"
@@ -754,8 +785,13 @@ do_tailscale() {
         echo -e "  $(gum style --faint 'Install URL: https://login.tailscale.com/admin/settings/keys')"
         echo ""
 
-        # Check if connected
-        if echo "$TS_STATUS" | grep -q "stopped\|not running"; then
+        # Check if connected — tailscale status returns exit code 0 when connected
+        TS_CONNECTED=true
+        tailscale status &>/dev/null || TS_CONNECTED=false
+
+        if [ "$TS_CONNECTED" = false ]; then
+            echo -e "  $(gum style --foreground 214 '● Disconnected')"
+            echo ""
             ACTION=$(gum choose \
                 --cursor="▸ " \
                 --cursor.foreground 36 \
@@ -766,6 +802,8 @@ do_tailscale() {
                 "🗑   Uninstall Tailscale" \
                 "↩   Back")
         else
+            echo -e "  $(gum style --foreground 76 '● Connected')"
+            echo ""
             ACTION=$(gum choose \
                 --cursor="▸ " \
                 --cursor.foreground 36 \
@@ -807,14 +845,20 @@ do_tailscale() {
                 AUTH_KEY=$(gum input --prompt "  Auth Key (tskey-auth-...): " --password)
                 if [ -n "$AUTH_KEY" ]; then
                     HOSTNAME_VAL=$(hostname)
-                    tailscale up --authkey="$AUTH_KEY" --ssh --hostname="$HOSTNAME_VAL" 2>/dev/null && {
+                    if tailscale status &>/dev/null; then
                         NEW_IP=$(tailscale ip -4 2>/dev/null || echo "pending")
-                        echo -e "  $(gum style --foreground 76 '✓ Connected!')"
+                        echo -e "  $(gum style --foreground 76 '✓ Already connected!')"
                         echo -e "  Tailscale IP: $(gum style --foreground 76 "$NEW_IP")"
-                    } || {
-                        echo -e "  $(gum style --foreground 214 '✗ Connection failed — try interactive login')"
-                        echo -e "  $(gum style --faint 'Run: tailscale up')"
-                    }
+                    else
+                        tailscale up --authkey="$AUTH_KEY" --ssh --hostname="$HOSTNAME_VAL" 2>/dev/null && {
+                            NEW_IP=$(tailscale ip -4 2>/dev/null || echo "pending")
+                            echo -e "  $(gum style --foreground 76 '✓ Connected!')"
+                            echo -e "  Tailscale IP: $(gum style --foreground 76 "$NEW_IP")"
+                        } || {
+                            echo -e "  $(gum style --foreground 214 '✗ Connection failed — try interactive login')"
+                            echo -e "  $(gum style --faint 'Run: tailscale up')"
+                        }
+                    fi
                 else
                     echo -e "  $(gum style --faint 'Skipped — run `tailscale up` to connect later')"
                 fi
@@ -827,14 +871,19 @@ do_tailscale() {
             AUTH_KEY=$(gum input --prompt "  Auth Key (tskey-auth-...): " --password)
             if [ -n "$AUTH_KEY" ]; then
                 HOSTNAME_VAL=$(hostname)
-                echo -e "  ${YELLOW}Connecting...${NC}"
-                tailscale up --authkey="$AUTH_KEY" --ssh --hostname="$HOSTNAME_VAL" 2>/dev/null && {
+                if tailscale status &>/dev/null; then
                     NEW_IP=$(tailscale ip -4 2>/dev/null || echo "pending")
-                    echo -e "  $(gum style --foreground 76 '✓ Connected!')"
-                    echo -e "  Tailscale IP: $(gum style --foreground 76 "$NEW_IP")"
-                } || {
-                    echo -e "  $(gum style --foreground 214 '✗ Connection failed')"
-                }
+                    echo -e "  $(gum style --foreground 76 '✓ Already connected! IP: $NEW_IP')"
+                else
+                    echo -e "  ${YELLOW}Connecting...${NC}"
+                    tailscale up --authkey="$AUTH_KEY" --ssh --hostname="$HOSTNAME_VAL" 2>/dev/null && {
+                        NEW_IP=$(tailscale ip -4 2>/dev/null || echo "pending")
+                        echo -e "  $(gum style --foreground 76 '✓ Connected!')"
+                        echo -e "  Tailscale IP: $(gum style --foreground 76 "$NEW_IP")"
+                    } || {
+                        echo -e "  $(gum style --foreground 214 '✗ Connection failed')"
+                    }
+                fi
             fi
             echo ""
             ;;
@@ -1025,7 +1074,7 @@ VNCSVC
             echo -e "  ${YELLOW}Stopping VNC...${NC}"
             systemctl stop vncserver 2>/dev/null || true
             systemctl disable vncserver 2>/dev/null || true
-            rm -f /etc/systemd/system/vncserver@.service
+            rm -f /etc/systemd/system/vncserver.service
             systemctl daemon-reload
             vncserver -kill :1 2>/dev/null || true
 
@@ -1068,17 +1117,46 @@ _install_remote_desktop() {
     echo -e "  $(gum style --faint 'This may take a few minutes on first install...')"
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq
-    apt-get install -y -qq xfce4 xfce4-goodies dbus-x11 xterm 2>&1 | tail -1
+
+    # Core desktop packages
+    DESKTOP_PKGS="xfce4 dbus-x11 xterm"
+    echo -e "  $(gum style --faint 'Installing core packages...')"
+    if ! apt-get install -y $DESKTOP_PKGS 2>&1; then
+        echo -e "  $(gum style --foreground 214 '⚠ Retrying with --fix-broken...')"
+        apt-get --fix-broken install -y
+        apt-get install -y $DESKTOP_PKGS
+    fi
+
+    # Optional goodies (non-fatal)
+    echo -e "  $(gum style --faint 'Installing extras...')"
+    apt-get install -y xfce4-goodies 2>/dev/null || true
+
+    # Verify critical binaries
+    if ! command -v startxfce4 &>/dev/null; then
+        echo -e "  $(gum style --foreground 196 '✗ startxfce4 not found — XFCE4 install may have failed')"
+        echo -e "  $(gum style --faint '  Try: apt-get install -y xfce4 xfce4-session')"
+    fi
+    if ! command -v xterm &>/dev/null; then
+        echo -e "  $(gum style --foreground 196 '✗ xterm not found')"
+    fi
     echo -e "  $(gum style --foreground 76 '✓ XFCE4 installed')"
     echo ""
 
     # ── Step 2: VNC server ──
     STEP=$((STEP + 1))
     echo -e "${YELLOW}[$STEP/$TOTAL] Installing TigerVNC...${NC}"
-    apt-get install -y -qq tigervnc-standalone-server tigervnc-common
+    if ! apt-get install -y tigervnc-standalone-server tigervnc-common 2>&1; then
+        echo -e "  $(gum style --foreground 214 '⚠ Retrying...')"
+        apt-get --fix-broken install -y
+        apt-get install -y tigervnc-standalone-server tigervnc-common
+    fi
     # Verify binary exists (package may report installed but binary missing)
     if ! command -v vncserver &>/dev/null; then
-        apt-get install --reinstall -y -qq tigervnc-standalone-server
+        apt-get install --reinstall -y tigervnc-standalone-server
+    fi
+    if ! command -v vncserver &>/dev/null; then
+        echo -e "  $(gum style --foreground 196 '✗ vncserver binary not found after install')"
+        return 1
     fi
     echo -e "  $(gum style --foreground 76 '✓ TigerVNC installed')"
     echo ""
@@ -1157,7 +1235,14 @@ VNCSERVICE
     systemctl enable vncserver
     systemctl start vncserver
 
-    echo -e "  $(gum style --foreground 76 '✓ Service installed and started')"
+    if ! systemctl is-active --quiet vncserver 2>/dev/null; then
+        echo -e "  $(gum style --foreground 214 '⚠ VNC service failed to start. Diagnostics:')"
+        journalctl -u vncserver -n 10 --no-pager 2>/dev/null | sed 's/^/    /'
+        echo ""
+        echo -e "  $(gum style --faint 'Try manually: vncserver :1 -geometry 1280x720 -depth 24')"
+    else
+        echo -e "  $(gum style --foreground 76 '✓ Service installed and started')"
+    fi
     echo ""
 
     # ── Done ──
@@ -1218,10 +1303,39 @@ _set_vnc_password() {
     chown "$VNC_USER" "$VNC_HOME/.vnc/passwd"
 
     # Also set view-only password to no
-    echo "$VNC_PASS\nn" | vncpasswd 2>/dev/null || true
+    printf '%s\nn\n' "$VNC_PASS" | vncpasswd 2>/dev/null || true
 
     echo -e "  $(gum style --foreground 76 '✓ VNC password set')"
     echo ""
+}
+
+# ──────────────────────────────────────────────
+# Shared QR code renderer
+# ──────────────────────────────────────────────
+_show_qr() {
+    local hostname="$1" ip="$2" token="$3" dtype="${4:-vps}"
+    local qr_data="{\"h\":\"$hostname\",\"a\":\"$ip\",\"p\":8080,\"t\":\"$token\",\"d\":\"$dtype\"}"
+
+    if [ -x /opt/pi-utility/venv/bin/python3 ]; then
+        /opt/pi-utility/venv/bin/python3 -c "
+import sys
+try:
+    import qrcode
+    qr = qrcode.QRCode(border=1)
+    qr.add_data(sys.argv[1])
+    qr.make(fit=True)
+    qr.print_ascii(invert=True)
+except ImportError:
+    print('qrcode not installed')
+" "$qr_data" 2>/dev/null
+    elif command -v qrencode &>/dev/null; then
+        qrencode -t ANSI "$qr_data"
+    else
+        echo -e "  $(gum style --faint 'QR tools not available. Raw data:')"
+        echo -e "  $qr_data"
+    fi
+    echo ""
+    echo -e "  $(gum style --foreground 36 '📱 Scan in PiControl app → Settings → Scan QR')"
 }
 
 do_qrcode() {
@@ -1255,33 +1369,12 @@ do_qrcode() {
     echo -e "  Token:    $(gum style --foreground 214 "${TOKEN:0:8}...")"
     echo ""
 
-    QR_DATA="{\"h\":\"$HOSTNAME_VAL\",\"a\":\"$IP\",\"p\":8080,\"t\":\"$TOKEN\",\"d\":\"$DEVICE_TYPE\"}"
-
-    # Try python qrcode first
-    if [ -x /opt/pi-utility/venv/bin/python3 ]; then
-        /opt/pi-utility/venv/bin/python3 -c "
-import sys
-try:
-    import qrcode
-    qr = qrcode.QRCode(border=1)
-    qr.add_data(sys.argv[1])
-    qr.make(fit=True)
-    qr.print_ascii(invert=True)
-except ImportError:
-    print('qrcode not installed')
-" "$QR_DATA" 2>/dev/null
-    elif command -v qrencode &>/dev/null; then
-        qrencode -t ANSI "$QR_DATA"
-    else
-        echo -e "  $(gum style --faint 'QR code tools not available. Install with:')"
-        echo -e "  $(gum style --faint '/opt/pi-utility/venv/bin/pip install qrcode[pil]')"
-        echo ""
-        echo -e "  $(gum style --faint 'Or scan this data manually:')"
-        echo -e "  $QR_DATA"
-    fi
+    _show_qr "$HOSTNAME_VAL" "$IP" "$TOKEN" "$DEVICE_TYPE"
     echo ""
     echo -e "  $(gum style --foreground 36 '📱 Scan in PiControl app → Settings → Scan QR')"
     echo ""
+    echo -e "  $(gum style --faint 'Press any key to return to menu...')"
+    read -rsn1
 }
 
 do_status() {
